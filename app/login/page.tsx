@@ -51,7 +51,7 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-[80dvh] flex-col justify-center">
       <div className="mb-10 text-center">
-        <Flame size={48} className="mx-auto mb-3 text-neon" />
+        <Flame size={48} className="mx-auto mb-3 text-primary" />
         <h1 className="text-3xl font-bold tracking-tight">FORJA</h1>
         <p className="mt-1 text-sm text-muted">
           Disciplina não se encontra. Se constrói.
@@ -59,8 +59,8 @@ export default function LoginPage() {
       </div>
 
       {!configured ? (
-        <div className="rounded-2xl border border-gold/40 bg-surface p-5 text-sm leading-relaxed">
-          <div className="mb-2 flex items-center gap-2 font-semibold text-gold">
+        <div className="rounded-2xl border border-amber/40 bg-surface p-5 text-sm leading-relaxed">
+          <div className="mb-2 flex items-center gap-2 font-semibold text-amber">
             <AlertTriangle size={18} /> Supabase não configurado
           </div>
           <ol className="list-decimal space-y-2 pl-5 text-muted">
@@ -94,7 +94,7 @@ export default function LoginPage() {
             placeholder="E-mail"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-xl border border-line bg-surface px-4 py-3.5 text-base outline-none focus:border-neon"
+            className="w-full rounded-xl border border-line bg-surface px-4 py-3.5 text-base outline-none focus:border-primary"
           />
           <input
             type="password"
@@ -103,14 +103,14 @@ export default function LoginPage() {
             placeholder="Senha (mín. 6 caracteres)"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-xl border border-line bg-surface px-4 py-3.5 text-base outline-none focus:border-neon"
+            className="w-full rounded-xl border border-line bg-surface px-4 py-3.5 text-base outline-none focus:border-primary"
           />
           {error && <p className="text-sm text-danger">{error}</p>}
-          {info && <p className="text-sm text-neon">{info}</p>}
+          {info && <p className="text-sm text-primary">{info}</p>}
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-xl bg-neon py-3.5 font-bold text-black transition-opacity disabled:opacity-50"
+            className="w-full rounded-xl bg-primary py-3.5 font-bold text-black transition-opacity disabled:opacity-50"
           >
             {loading
               ? "Aguarde..."

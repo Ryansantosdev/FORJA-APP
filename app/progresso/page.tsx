@@ -6,7 +6,7 @@ import { Download, Ruler, Check } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { todayStr, daysAgoStr, formatShort, toDateStr } from "@/lib/dates";
 import { getCached, setCached } from "@/lib/cache";
-import { SkeletonCard } from "@/components/Skeleton";
+import LoadState from "@/components/LoadState";
 import type { WeightPoint } from "@/components/ProgressoChart";
 
 const ProgressoChart = dynamic(() => import("@/components/ProgressoChart"), {
@@ -31,22 +31,29 @@ export default function ProgressoPage() {
   const [medidas, setMedidas] = useState({ cintura: "", braco: "", peito: "" });
   const [medidasSalvas, setMedidasSalvas] = useState(false);
   const [loading, setLoading] = useState(!getCached("prog_data"));
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    setLoadError(null);
+    const hadCache = Boolean(getCached("prog_data"));
+    if (!hadCache) setLoading(true);
 
-    const d7 = daysAgoStr(6);
-    const [weightsRes, mealsRes, mealLogsRes, workoutsRes, settingsRes, exRes, medidasRes] = await Promise.all([
-      supabase.from("weight_logs").select("date, peso").eq("user_id", user.id).order("date"),
-      supabase.from("meals").select("id").eq("user_id", user.id),
-      supabase.from("meal_logs").select("date, meal_id").eq("user_id", user.id).gte("date", daysAgoStr(89)),
-      supabase.from("workout_logs").select("date, concluido").eq("user_id", user.id).gte("date", daysAgoStr(89)),
-      supabase.from("user_settings").select("meta_peso").eq("user_id", user.id).maybeSingle(),
-      supabase.from("exercise_logs").select("carga, reps, date").eq("user_id", user.id).gte("date", d7),
-      supabase.from("measurements").select("cintura, braco, peito").eq("user_id", user.id).order("date", { ascending: false }).limit(1).maybeSingle(),
-    ]);
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const d7 = daysAgoStr(6);
+      const d90 = daysAgoStr(89);
+      const [weightsRes, mealsRes, mealLogsRes, workoutsRes, settingsRes, exRes, medidasRes] = await Promise.all([
+        supabase.from("weight_logs").select("date, peso").eq("user_id", user.id).order("date"),
+        supabase.from("meals").select("id").eq("user_id", user.id),
+        supabase.from("meal_logs").select("date, meal_id").eq("user_id", user.id).gte("date", d90),
+        supabase.from("workout_logs").select("date, concluido").eq("user_id", user.id).gte("date", d90),
+        supabase.from("user_settings").select("meta_peso").eq("user_id", user.id).maybeSingle(),
+        supabase.from("exercise_logs").select("carga, reps, date").eq("user_id", user.id).gte("date", d7),
+        supabase.from("measurements").select("cintura, braco, peito").eq("user_id", user.id).order("date", { ascending: false }).limit(1).maybeSingle(),
+      ]);
 
     const raw = (weightsRes.data ?? []).map((w) => ({ date: w.date, peso: Number(w.peso) }));
     const chartData: WeightPoint[] = raw.map((w, i) => ({ ...w, media7: movingAvg(raw, i) }));
@@ -93,7 +100,11 @@ export default function ProgressoPage() {
       });
     }
     setCached("prog_data", true);
-    setLoading(false);
+    } catch {
+      setLoadError("Não foi possível carregar o progresso. Tente de novo.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -149,11 +160,11 @@ export default function ProgressoPage() {
           <p className="text-xs text-muted">Volume semanal: {(volumeSemana / 1000).toFixed(1)}t</p>
         </div>
         <button onClick={exportarCsv} className="flex items-center gap-1 rounded-xl bg-surface px-3 py-2 text-xs font-semibold text-muted">
-          <Download size={14} /> CSV
+          <Download size={14} /> Exportar
         </button>
       </header>
 
-      {loading ? <SkeletonCard /> : (
+      <LoadState loading={loading} error={loadError} onRetry={() => load()}>
         <>
           <section className="rounded-2xl bg-surface p-4">
             <div className="mb-1 flex justify-between">
@@ -161,7 +172,7 @@ export default function ProgressoPage() {
               {delta && <p className={`text-sm font-bold ${Number(delta) <= 0 ? "text-primary" : "text-amber"}`}>{Number(delta) > 0 ? "+" : ""}{delta} kg</p>}
             </div>
             {weights.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted">Registre o peso no Dashboard.</p>
+              <p className="py-8 text-center text-sm text-muted">Registre o peso na aba Hoje.</p>
             ) : (
               <ProgressoChart data={weights} metaPeso={metaPeso} />
             )}
@@ -202,7 +213,7 @@ export default function ProgressoPage() {
             </div>
           </section>
         </>
-      )}
+      </LoadState>
     </div>
   );
 }

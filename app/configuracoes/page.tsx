@@ -5,6 +5,12 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Bell, BellOff, LogOut, Check } from "lucide-react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import {
+  ensureServiceWorker,
+  getPushBlockReason,
+  isPushApiAvailable,
+  urlBase64ToUint8Array,
+} from "@/lib/push";
 import type { UserSettings } from "@/lib/types";
 
 const DEFAULTS: UserSettings = {
@@ -21,7 +27,10 @@ export default function ConfiguracoesPage() {
   const router = useRouter();
   const [s, setS] = useState<UserSettings>(DEFAULTS);
   const [saved, setSaved] = useState(false);
-  const [pushStatus, setPushStatus] = useState<"idle" | "on" | "unsupported" | "denied">("idle");
+  const [pushStatus, setPushStatus] = useState<
+    "idle" | "on" | "unsupported" | "denied" | "needs_install" | "no_vapid" | "loading"
+  >("idle");
+  const [pushError, setPushError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -36,10 +45,17 @@ export default function ConfiguracoesPage() {
           agua_lembrete_horas: (data.agua_lembrete_horas as number[]) ?? DEFAULTS.agua_lembrete_horas,
         });
       }
+      const { count } = await supabase
+        .from("push_subscriptions")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id);
+      if (count && count > 0) setPushStatus("on");
     })();
-    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
-      setPushStatus("on");
-    }
+    const block = getPushBlockReason();
+    if (block === "no_vapid") setPushStatus("no_vapid");
+    else if (block === "needs_install") setPushStatus("needs_install");
+    else if (block === "denied") setPushStatus("denied");
+    else if (block === "no_browser") setPushStatus("unsupported");
   }, []);
 
   async function salvar() {
@@ -61,20 +77,52 @@ export default function ConfiguracoesPage() {
   }
 
   async function ativarPush() {
-    if (typeof window === "undefined" || !("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
-      setPushStatus("unsupported"); return;
+    setPushError(null);
+    const block = getPushBlockReason();
+    if (block === "no_browser") {
+      setPushStatus("unsupported");
+      return;
+    }
+    if (block === "no_vapid") {
+      setPushStatus("no_vapid");
+      return;
+    }
+    if (block === "needs_install") {
+      setPushStatus("needs_install");
+      return;
     }
     const vapid = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-    if (!vapid) { setPushStatus("unsupported"); return; }
-    const permission = await Notification.requestPermission();
-    if (permission !== "granted") { setPushStatus("denied"); return; }
-    const reg = await navigator.serviceWorker.ready;
-    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapid) });
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from("push_subscriptions").upsert({ user_id: user.id, endpoint: sub.endpoint, keys: sub.toJSON().keys }, { onConflict: "endpoint" });
-    setPushStatus("on");
+    if (!vapid) {
+      setPushStatus("no_vapid");
+      return;
+    }
+
+    setPushStatus("loading");
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setPushStatus("denied");
+        return;
+      }
+      await ensureServiceWorker();
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapid),
+      });
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { error } = await supabase.from("push_subscriptions").upsert(
+        { user_id: user.id, endpoint: sub.endpoint, keys: sub.toJSON().keys },
+        { onConflict: "endpoint" }
+      );
+      if (error) throw error;
+      setPushStatus("on");
+    } catch (e) {
+      setPushStatus("idle");
+      setPushError(e instanceof Error ? e.message : "Erro ao ativar notificações");
+    }
   }
 
   async function sair() {
@@ -127,16 +175,49 @@ export default function ConfiguracoesPage() {
 
       <section className="rounded-2xl bg-surface p-4">
         <p className="mb-2 text-sm font-semibold">Notificações push</p>
-        <p className="mb-3 text-xs text-muted">No iPhone: instale o app na tela de início (iOS 16.4+). Funciona após deploy na Vercel.</p>
+        <p className="mb-3 text-xs text-muted">
+          Lembretes de água (5×) e metas (21h). No iPhone: instale na tela de início e use iOS 16.4+.
+        </p>
         {pushStatus === "on" ? (
-          <p className="flex items-center gap-2 text-sm text-primary"><Bell size={16} /> Ativadas</p>
+          <p className="flex items-center gap-2 text-sm text-primary">
+            <Bell size={16} /> Ativadas — você receberá os lembretes nos horários configurados.
+          </p>
+        ) : pushStatus === "needs_install" ? (
+          <div className="space-y-2 text-sm text-muted">
+            <p className="flex items-center gap-2"><BellOff size={16} /> Instale o app na tela de início primeiro.</p>
+            <ol className="list-decimal space-y-1 pl-5 text-xs">
+              <li>Safari → Compartilhar → Adicionar à Tela de Início</li>
+              <li>Abra pelo ícone <strong className="text-ink">Forja</strong> (não pelo Safari)</li>
+              <li>Volte aqui e toque em Ativar</li>
+            </ol>
+            {isPushApiAvailable() && (
+              <button onClick={ativarPush} className="mt-2 flex items-center gap-2 rounded-xl border border-line bg-elev px-4 py-3 text-sm">
+                <Bell size={16} /> Tentar ativar
+              </button>
+            )}
+          </div>
+        ) : pushStatus === "no_vapid" ? (
+          <p className="flex items-center gap-2 text-sm text-muted">
+            <BellOff size={16} /> Configure as chaves VAPID na Vercel e faça Redeploy (veja README).
+          </p>
         ) : pushStatus === "unsupported" ? (
-          <p className="flex items-center gap-2 text-sm text-muted"><BellOff size={16} /> Indisponível (configure VAPID ou use após deploy)</p>
+          <p className="flex items-center gap-2 text-sm text-muted">
+            <BellOff size={16} /> Navegador sem suporte a push.
+          </p>
         ) : pushStatus === "denied" ? (
-          <p className="text-sm text-danger">Permissão negada no navegador</p>
+          <p className="text-sm text-danger">
+            Permissão negada. iPhone → Ajustes → Forja → Notificações → Permitir.
+          </p>
         ) : (
-          <button onClick={ativarPush} className="flex items-center gap-2 rounded-xl border border-line bg-elev px-4 py-3 text-sm"><Bell size={16} /> Ativar</button>
+          <button
+            onClick={ativarPush}
+            disabled={pushStatus === "loading"}
+            className="flex items-center gap-2 rounded-xl border border-line bg-elev px-4 py-3 text-sm disabled:opacity-50"
+          >
+            <Bell size={16} /> {pushStatus === "loading" ? "Ativando..." : "Ativar notificações"}
+          </button>
         )}
+        {pushError && <p className="mt-2 text-xs text-danger">{pushError}</p>}
       </section>
 
       <button onClick={sair} className="flex w-full items-center justify-center gap-2 rounded-2xl border border-danger/40 py-3.5 text-sm text-danger">
@@ -155,11 +236,3 @@ function NumInput({ value, onChange }: { value: number; onChange: (v: number) =>
     className="w-24 rounded-xl border border-line bg-elev px-3 py-2 text-center text-sm outline-none focus:border-primary" />;
 }
 
-function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const rawData = atob(base64);
-  const arr = new Uint8Array(new ArrayBuffer(rawData.length));
-  for (let i = 0; i < rawData.length; i++) arr[i] = rawData.charCodeAt(i);
-  return arr;
-}

@@ -20,8 +20,20 @@ import { createClient } from "@/lib/supabase/client";
 import { todayStr, yesterdayStr, isRetroactiveWindow } from "@/lib/dates";
 import { getCached, setCached } from "@/lib/cache";
 import SwipeCard from "@/components/SwipeCard";
-import { SkeletonCard } from "@/components/Skeleton";
+import LoadState from "@/components/LoadState";
 import type { Meal, MealItem } from "@/lib/types";
+
+type DietaCache = {
+  meals: Meal[];
+  doneIds: string[];
+  aguaMl: number;
+  metaAgua: number;
+  copoMl: number;
+};
+
+function readDietaCache(): DietaCache | null {
+  return getCached<DietaCache>("dieta_data");
+}
 
 const ICONES: Record<string, React.ElementType> = {
   coffee: Coffee,
@@ -31,57 +43,91 @@ const ICONES: Record<string, React.ElementType> = {
 };
 
 export default function DietaPage() {
-  const [meals, setMeals] = useState<Meal[]>([]);
-  const [done, setDone] = useState<Set<string>>(new Set());
-  const [aguaMl, setAguaMl] = useState(0);
-  const [metaAgua, setMetaAgua] = useState(3000);
-  const [copoMl, setCopoMl] = useState(250);
+  const cached = readDietaCache();
+  const [meals, setMeals] = useState<Meal[]>(() => cached?.meals ?? []);
+  const [done, setDone] = useState<Set<string>>(
+    () => new Set(cached?.doneIds ?? [])
+  );
+  const [aguaMl, setAguaMl] = useState(() => cached?.aguaMl ?? 0);
+  const [metaAgua, setMetaAgua] = useState(() => cached?.metaAgua ?? 3000);
+  const [copoMl, setCopoMl] = useState(() => cached?.copoMl ?? 250);
   const [editing, setEditing] = useState<Meal | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cached);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const today = todayStr();
   const [activeDate, setActiveDate] = useState(() => todayStr());
 
   const load = useCallback(async () => {
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return;
+    setLoadError(null);
+    const hadCache = Boolean(readDietaCache());
+    if (!hadCache) setLoading(true);
 
-    const [mealsRes, logsRes, dailyRes, settingsRes] = await Promise.all([
-      supabase
-        .from("meals")
-        .select("id, ordem, nome, icone, itens")
-        .eq("user_id", user.id)
-        .order("ordem"),
-      supabase
-        .from("meal_logs")
-        .select("meal_id")
-        .eq("user_id", user.id)
-        .eq("date", activeDate),
-      supabase
-        .from("daily_logs")
-        .select("agua_ml")
-        .eq("user_id", user.id)
-        .eq("date", today)
-        .maybeSingle(),
-      supabase
-        .from("user_settings")
-        .select("meta_agua_ml, copo_ml")
-        .eq("user_id", user.id)
-        .maybeSingle(),
-    ]);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
 
-    setMeals((mealsRes.data as Meal[]) ?? []);
-    setDone(new Set(logsRes.data?.map((l) => l.meal_id)));
-    if (activeDate === today) setAguaMl(dailyRes.data?.agua_ml ?? 0);
-    if (settingsRes.data) {
-      setMetaAgua(settingsRes.data.meta_agua_ml);
-      setCopoMl(settingsRes.data.copo_ml);
+      const [mealsRes, logsRes, dailyRes, settingsRes] = await Promise.all([
+        supabase
+          .from("meals")
+          .select("id, ordem, nome, icone, itens")
+          .eq("user_id", user.id)
+          .order("ordem"),
+        supabase
+          .from("meal_logs")
+          .select("meal_id")
+          .eq("user_id", user.id)
+          .eq("date", activeDate),
+        supabase
+          .from("daily_logs")
+          .select("agua_ml")
+          .eq("user_id", user.id)
+          .eq("date", today)
+          .maybeSingle(),
+        supabase
+          .from("user_settings")
+          .select("meta_agua_ml, copo_ml")
+          .eq("user_id", user.id)
+          .maybeSingle(),
+      ]);
+
+      if (mealsRes.error) throw mealsRes.error;
+
+      const m = (mealsRes.data as Meal[]) ?? [];
+      const doneIds = logsRes.data?.map((l) => l.meal_id) ?? [];
+      const agua = activeDate === today ? (dailyRes.data?.agua_ml ?? 0) : aguaMl;
+      const meta = settingsRes.data?.meta_agua_ml ?? 3000;
+      const copo = settingsRes.data?.copo_ml ?? 250;
+
+      setMeals(m);
+      setDone(new Set(doneIds));
+      if (activeDate === today) setAguaMl(agua);
+      setMetaAgua(meta);
+      setCopoMl(copo);
+      setCached("dieta_data", {
+        meals: m,
+        doneIds,
+        aguaMl: agua,
+        metaAgua: meta,
+        copoMl: copo,
+      });
+    } catch (e) {
+      const msg =
+        e && typeof e === "object" && "message" in e
+          ? String((e as { message: string }).message)
+          : "Erro ao carregar dieta.";
+      setLoadError(
+        msg.includes("meals")
+          ? "Cardápio não encontrado. Rode supabase/schema.sql no Supabase."
+          : "Não foi possível carregar. Verifique a conexão."
+      );
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [activeDate, today]);
 
   useEffect(() => {
@@ -270,10 +316,31 @@ export default function DietaPage() {
         </div>
       </section>
 
-      {loading ? (
-        <SkeletonCard />
-      ) : (
-        meals.map((meal) => {
+      <LoadState
+        loading={loading}
+        error={loadError}
+        onRetry={() => load()}
+        empty={!loading && !loadError && meals.length === 0}
+        emptyTitle="Cardápio vazio"
+        emptyDesc="Seu cardápio ainda não foi criado. Rode o schema no Supabase ou adicione refeições."
+        emptyAction={
+          <button
+            onClick={() =>
+              setEditing({
+                id: "nova",
+                ordem: 1,
+                nome: "Nova refeição",
+                icone: "utensils",
+                itens: [],
+              })
+            }
+            className="rounded-xl bg-primary px-4 py-3 font-bold text-black"
+          >
+            Adicionar refeição
+          </button>
+        }
+      >
+        {meals.map((meal) => {
           const Icon = ICONES[meal.icone] ?? Utensils;
           const isDone = done.has(meal.id);
           const kcal = meal.itens.reduce((a, i) => a + (i.kcal || 0), 0);
@@ -357,8 +424,8 @@ export default function DietaPage() {
               {card}
             </SwipeCard>
           );
-        })
-      )}
+        })}
+      </LoadState>
 
       {editMode && (
         <button
@@ -428,7 +495,7 @@ function MealEditor({
           value={nome}
           onChange={(e) => setNome(e.target.value)}
           placeholder="ex: Café da Manhã"
-          className="mb-4 w-full rounded-xl border border-line bg-elev px-4 py-3 text-base outline-none focus:border-neon"
+          className="mb-4 w-full rounded-xl border border-line bg-elev px-4 py-3 text-base outline-none focus:border-primary"
         />
 
         <p className="mb-2 text-xs text-muted">Itens</p>
@@ -440,7 +507,7 @@ function MealEditor({
                   value={item.nome}
                   onChange={(e) => setItem(i, { nome: e.target.value })}
                   placeholder="Alimento"
-                  className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-neon"
+                  className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
                 />
                 <button
                   onClick={() => setItens(itens.filter((_, idx) => idx !== i))}
@@ -455,7 +522,7 @@ function MealEditor({
                   value={item.quantidade}
                   onChange={(e) => setItem(i, { quantidade: e.target.value })}
                   placeholder="150g"
-                  className="w-24 rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-neon"
+                  className="w-24 rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
                 />
                 <input
                   type="number"
@@ -465,7 +532,7 @@ function MealEditor({
                     setItem(i, { kcal: parseInt(e.target.value) || 0 })
                   }
                   placeholder="kcal"
-                  className="w-20 rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-neon"
+                  className="w-20 rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
                 />
                 <input
                   value={item.substituicoes.join(", ")}
@@ -478,7 +545,7 @@ function MealEditor({
                     })
                   }
                   placeholder="substituições (vírgula)"
-                  className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-neon"
+                  className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
                 />
               </div>
             </div>
@@ -510,7 +577,7 @@ function MealEditor({
             onClick={() =>
               nome.trim() && onSave({ ...meal, nome: nome.trim(), itens })
             }
-            className="flex-1 rounded-xl bg-neon py-3 font-bold text-black"
+            className="flex-1 rounded-xl bg-primary py-3 font-bold text-black"
           >
             Salvar
           </button>

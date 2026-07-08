@@ -19,7 +19,7 @@ import { todayStr, DIAS_SEMANA, dayOfWeek } from "@/lib/dates";
 import { getScheduledWorkoutId, findWorkoutById } from "@/lib/schedule";
 import { TEMPLATE_PACKS } from "@/lib/workout-templates";
 import { getCached, setCached } from "@/lib/cache";
-import { SkeletonCard } from "@/components/Skeleton";
+import LoadState from "@/components/LoadState";
 import RestTimer from "@/components/RestTimer";
 import type { Workout, ExerciseDef } from "@/lib/types";
 
@@ -45,6 +45,9 @@ export default function TreinoPage() {
   const [newPr, setNewPr] = useState<string | null>(null);
   const [timerKey, setTimerKey] = useState<number | null>(null);
   const [loading, setLoading] = useState(!getCached("treino_workouts"));
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [importingId, setImportingId] = useState<string | null>(null);
+  const [importFeedback, setImportFeedback] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [showAgenda, setShowAgenda] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
@@ -56,75 +59,102 @@ export default function TreinoPage() {
   const active = findWorkoutById(workouts, activeId);
 
   const load = useCallback(async () => {
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return;
+    setLoadError(null);
+    const hadCache = Boolean(getCached("treino_workouts"));
+    if (!hadCache) setLoading(true);
 
-    const [wRes, sRes, logRes, exToday, allLogs] = await Promise.all([
-      supabase
-        .from("workouts")
-        .select("id, ordem, letra, nome, exercicios")
-        .eq("user_id", user.id)
-        .order("ordem"),
-      supabase
-        .from("user_settings")
-        .select("agenda_treino")
-        .eq("user_id", user.id)
-        .maybeSingle(),
-      supabase
-        .from("workout_logs")
-        .select("workout_id, tipo_treino, concluido")
-        .eq("user_id", user.id)
-        .eq("date", today)
-        .maybeSingle(),
-      supabase
-        .from("exercise_logs")
-        .select("exercicio")
-        .eq("user_id", user.id)
-        .eq("date", today),
-      supabase
-        .from("exercise_logs")
-        .select("exercicio, carga, reps, date")
-        .eq("user_id", user.id)
-        .order("date", { ascending: false })
-        .limit(500),
-    ]);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
 
-    const ws = (wRes.data as Workout[]) ?? [];
-    const ag = (sRes.data?.agenda_treino as Record<string, string | null>) ?? {};
-    setWorkouts(ws);
-    setAgenda(ag);
-    setCached("treino_workouts", ws);
-    setCached("treino_agenda", ag);
+      const [wRes, sRes, logRes, exToday, allLogs] = await Promise.all([
+        supabase
+          .from("workouts")
+          .select("id, ordem, letra, nome, exercicios")
+          .eq("user_id", user.id)
+          .order("ordem"),
+        supabase
+          .from("user_settings")
+          .select("agenda_treino")
+          .eq("user_id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("workout_logs")
+          .select("workout_id, tipo_treino, concluido")
+          .eq("user_id", user.id)
+          .eq("date", today)
+          .maybeSingle(),
+        supabase
+          .from("exercise_logs")
+          .select("exercicio")
+          .eq("user_id", user.id)
+          .eq("date", today),
+        supabase
+          .from("exercise_logs")
+          .select("exercicio, carga, reps, date")
+          .eq("user_id", user.id)
+          .order("date", { ascending: false })
+          .limit(120),
+      ]);
 
-    if (logRes.data) {
-      setActiveId(logRes.data.workout_id ?? null);
-      setConcluido(logRes.data.concluido);
-    } else if (scheduledId) {
-      setActiveId(scheduledId);
+      if (wRes.error) throw wRes.error;
+
+      const ws = (wRes.data as Workout[]) ?? [];
+      const ag = (sRes.data?.agenda_treino as Record<string, string | null>) ?? {};
+      setWorkouts(ws);
+      setAgenda(ag);
+      setCached("treino_workouts", ws);
+      setCached("treino_agenda", ag);
+
+      const schedId = getScheduledWorkoutId(ag);
+      let nextActive: string | null = null;
+      if (logRes.data?.workout_id && ws.some((w) => w.id === logRes.data!.workout_id)) {
+        nextActive = logRes.data.workout_id;
+        setConcluido(logRes.data.concluido);
+      } else if (schedId && ws.some((w) => w.id === schedId)) {
+        nextActive = schedId;
+        setConcluido(logRes.data?.concluido ?? false);
+      } else {
+        setConcluido(false);
+      }
+      setActiveId(nextActive);
+
+      const last: Record<string, { carga: number; reps: number }> = {};
+      const maxes: Record<string, number> = {};
+      for (const log of allLogs.data ?? []) {
+        if (!last[log.exercicio])
+          last[log.exercicio] = { carga: Number(log.carga), reps: log.reps };
+        maxes[log.exercicio] = Math.max(
+          maxes[log.exercicio] ?? 0,
+          Number(log.carga)
+        );
+      }
+      setLastLoads(last);
+      setPrs(maxes);
+
+      const series: SerieState = {};
+      for (const ex of exToday.data ?? []) {
+        series[ex.exercicio] = (series[ex.exercicio] ?? 0) + 1;
+      }
+      setSerieAtual(series);
+    } catch (e) {
+      const msg =
+        e && typeof e === "object" && "message" in e
+          ? String((e as { message: string }).message)
+          : "Erro ao carregar treinos.";
+      if (msg.includes("workouts") || msg.includes("schema")) {
+        setLoadError(
+          "Tabela de treinos não encontrada. Rode supabase/migration-v2.sql no Supabase."
+        );
+      } else {
+        setLoadError(msg.includes("demorou") ? msg : "Não foi possível carregar. Verifique a conexão.");
+      }
+    } finally {
+      setLoading(false);
     }
-
-    const last: Record<string, { carga: number; reps: number }> = {};
-    const maxes: Record<string, number> = {};
-    for (const log of allLogs.data ?? []) {
-      if (!last[log.exercicio])
-        last[log.exercicio] = { carga: Number(log.carga), reps: log.reps };
-      maxes[log.exercicio] = Math.max(
-        maxes[log.exercicio] ?? 0,
-        Number(log.carga)
-      );
-    }
-    setLastLoads(last);
-    setPrs(maxes);
-
-    const series: SerieState = {};
-    for (const ex of exToday.data ?? []) {
-      series[ex.exercicio] = (series[ex.exercicio] ?? 0) + 1;
-    }
-    setSerieAtual(series);
-    setLoading(false);
   }, [today]);
 
   useEffect(() => {
@@ -220,24 +250,54 @@ export default function TreinoPage() {
   async function importarTemplate(packId: string) {
     const pack = TEMPLATE_PACKS.find((p) => p.id === packId);
     if (!pack) return;
+
+    const msg =
+      workouts.length > 0
+        ? `Adicionar ${pack.treinos.length} treinos do modelo "${pack.nome}" aos seus treinos atuais?`
+        : `Importar o modelo "${pack.nome}" (${pack.treinos.length} treinos)?`;
+    if (!confirm(msg)) return;
+
+    setImportingId(packId);
+    setImportFeedback(null);
     const supabase = createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return;
-    const startOrdem = workouts.length;
-    for (let i = 0; i < pack.treinos.length; i++) {
-      const t = pack.treinos[i];
-      await supabase.from("workouts").insert({
-        user_id: user.id,
-        ordem: startOrdem + i + 1,
-        letra: t.letra,
-        nome: t.nome,
-        exercicios: t.exercicios,
-      });
+    if (!user) {
+      setImportingId(null);
+      return;
     }
-    setShowTemplates(false);
-    load();
+
+    try {
+      const startOrdem = workouts.length;
+      for (let i = 0; i < pack.treinos.length; i++) {
+        const t = pack.treinos[i];
+        const { error } = await supabase.from("workouts").insert({
+          user_id: user.id,
+          ordem: startOrdem + i + 1,
+          letra: t.letra,
+          nome: t.nome,
+          exercicios: t.exercicios,
+        });
+        if (error) throw error;
+      }
+      setImportFeedback(`Modelo "${pack.nome}" importado com sucesso.`);
+      setShowTemplates(false);
+      setEditMode(false);
+      await load();
+    } catch (e) {
+      const err =
+        e && typeof e === "object" && "message" in e
+          ? String((e as { message: string }).message)
+          : "Falha ao importar.";
+      setImportFeedback(
+        err.includes("workouts")
+          ? "Erro: rode migration-v2.sql no Supabase (tabela workouts)."
+          : `Erro: ${err}`
+      );
+    } finally {
+      setImportingId(null);
+    }
   }
 
   async function salvarWorkout(w: Workout) {
@@ -291,6 +351,13 @@ export default function TreinoPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => setShowTemplates(true)}
+            className="rounded-xl border border-line bg-surface p-2.5 text-muted"
+            aria-label="Modelos de treino"
+          >
+            <Download size={18} />
+          </button>
           <button
             onClick={() => setShowAgenda(!showAgenda)}
             className="rounded-xl border border-line bg-surface p-2.5 text-muted"
@@ -348,9 +415,45 @@ export default function TreinoPage() {
         </section>
       )}
 
-      {loading ? (
-        <SkeletonCard />
-      ) : (
+      {importFeedback && (
+        <p className="rounded-xl border border-primary/30 bg-primary/10 px-4 py-2 text-sm text-primary">
+          {importFeedback}
+        </p>
+      )}
+
+      <LoadState
+        loading={loading}
+        error={loadError}
+        onRetry={() => load()}
+        empty={!loading && !loadError && workouts.length === 0}
+        emptyTitle="Nenhum treino cadastrado"
+        emptyDesc="Importe um modelo pronto ou crie seu primeiro treino."
+        emptyAction={
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={() => setShowTemplates(true)}
+              className="w-full rounded-xl bg-primary py-3 font-bold text-black"
+            >
+              Ver modelos
+            </button>
+            <button
+              onClick={() => {
+                setEditMode(true);
+                setEditing({
+                  id: "nova",
+                  ordem: 1,
+                  letra: "",
+                  nome: "",
+                  exercicios: [],
+                });
+              }}
+              className="w-full rounded-xl border border-line py-3 text-sm text-muted"
+            >
+              Criar treino manual
+            </button>
+          </div>
+        }
+      >
         <>
           {/* SUGESTÃO DO DIA */}
           {scheduled && activeId !== scheduled.id && !concluido && (
@@ -368,8 +471,8 @@ export default function TreinoPage() {
             </button>
           )}
 
-          {/* LISTA DE TREINOS (modo edição ou seleção) */}
-          {(!active || editMode) && (
+          {/* LISTA DE TREINOS */}
+          {(!active || editMode) && workouts.length > 0 && (
             <div className="space-y-2">
               {workouts.map((w) => (
                 <div
@@ -421,7 +524,7 @@ export default function TreinoPage() {
                     onClick={() => setShowTemplates(true)}
                     className="flex flex-1 items-center justify-center gap-1 rounded-xl border border-line bg-elev py-3 text-sm text-muted"
                   >
-                    <Download size={16} /> Templates
+                    <Download size={16} /> Modelos
                   </button>
                 </div>
               )}
@@ -478,7 +581,7 @@ export default function TreinoPage() {
 
                     {newPr === ex.nome && (
                       <div className="mt-2 flex items-center gap-2 rounded-lg border border-amber/40 bg-amber/10 px-3 py-2 text-sm font-semibold text-amber">
-                        <Trophy size={16} /> NOVO PR!
+                        <Trophy size={16} /> NOVO RECORDE!
                       </div>
                     )}
 
@@ -562,24 +665,33 @@ export default function TreinoPage() {
             </div>
           )}
         </>
-      )}
+      </LoadState>
 
       {showTemplates && (
-        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/70">
-          <div className="max-h-[80dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5">
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/70"
+          onClick={() => !importingId && setShowTemplates(false)}
+        >
+          <div
+            className="max-h-[80dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-bold">Templates</h2>
-              <button onClick={() => setShowTemplates(false)}>
+              <h2 className="text-lg font-bold">Modelos de treino</h2>
+              <button onClick={() => setShowTemplates(false)} disabled={!!importingId}>
                 <X size={20} />
               </button>
             </div>
             {TEMPLATE_PACKS.map((p) => (
               <button
                 key={p.id}
+                disabled={!!importingId}
                 onClick={() => importarTemplate(p.id)}
-                className="mb-2 w-full rounded-xl border border-line bg-elev p-4 text-left"
+                className="mb-2 w-full rounded-xl border border-line bg-elev p-4 text-left disabled:opacity-50"
               >
-                <p className="font-semibold">{p.nome}</p>
+                <p className="font-semibold">
+                  {importingId === p.id ? "Importando..." : p.nome}
+                </p>
                 <p className="text-xs text-muted">{p.descricao}</p>
               </button>
             ))}

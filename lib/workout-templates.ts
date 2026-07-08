@@ -58,7 +58,7 @@ export const TEMPLATE_PACKS: TemplatePack[] = [
         nome: "Boxe",
         exercicios: [
           { nome: "Pular corda", series: 3, reps_alvo: "3 min" },
-          { nome: "Sombra (shadow boxing)", series: 3, reps_alvo: "3 min" },
+          { nome: "Sombra (boxe)", series: 3, reps_alvo: "3 min" },
           { nome: "Saco pesado", series: 4, reps_alvo: "3 min" },
           { nome: "Manoplas / técnica", series: 3, reps_alvo: "3 min" },
           { nome: "Abdômen", series: 3, reps_alvo: "20" },
@@ -68,7 +68,7 @@ export const TEMPLATE_PACKS: TemplatePack[] = [
   },
   {
     id: "upper-lower",
-    nome: "Upper / Lower 4x",
+    nome: "Superior / Inferior 4x",
     descricao: "4 treinos por semana: superior e inferior alternados",
     treinos: [
       {
@@ -121,12 +121,12 @@ export const TEMPLATE_PACKS: TemplatePack[] = [
   },
   {
     id: "ppl",
-    nome: "Push / Pull / Legs",
-    descricao: "Empurrar, puxar e pernas — clássico de hipertrofia",
+    nome: "Empurrar / Puxar / Pernas",
+    descricao: "Peito, costas e pernas — clássico de hipertrofia",
     treinos: [
       {
         letra: "PU",
-        nome: "Push — Peito/Ombro/Tríceps",
+        nome: "Empurrar — Peito, ombro e tríceps",
         exercicios: [
           { nome: "Supino Reto", series: 4, reps_alvo: "6-10" },
           { nome: "Desenvolvimento", series: 3, reps_alvo: "8-10" },
@@ -137,7 +137,7 @@ export const TEMPLATE_PACKS: TemplatePack[] = [
       },
       {
         letra: "PL",
-        nome: "Pull — Costas/Bíceps",
+        nome: "Puxar — Costas e bíceps",
         exercicios: [
           { nome: "Puxada Frontal", series: 4, reps_alvo: "6-10" },
           { nome: "Remada Curvada", series: 3, reps_alvo: "8-10" },
@@ -148,7 +148,7 @@ export const TEMPLATE_PACKS: TemplatePack[] = [
       },
       {
         letra: "LG",
-        nome: "Legs — Pernas completas",
+        nome: "Pernas — Completo",
         exercicios: [
           { nome: "Agachamento", series: 4, reps_alvo: "6-10" },
           { nome: "Leg Press", series: 3, reps_alvo: "10-12" },
@@ -161,12 +161,12 @@ export const TEMPLATE_PACKS: TemplatePack[] = [
   },
   {
     id: "fullbody",
-    nome: "Full Body 3x",
-    descricao: "Corpo inteiro, 3x por semana — simples e brutal",
+    nome: "Corpo inteiro 3x",
+    descricao: "Corpo inteiro, 3 vezes por semana — simples e direto",
     treinos: [
       {
         letra: "F1",
-        nome: "Full Body 1",
+        nome: "Corpo inteiro 1",
         exercicios: [
           { nome: "Agachamento", series: 3, reps_alvo: "6-10" },
           { nome: "Supino Reto", series: 3, reps_alvo: "6-10" },
@@ -177,7 +177,7 @@ export const TEMPLATE_PACKS: TemplatePack[] = [
       },
       {
         letra: "F2",
-        nome: "Full Body 2",
+        nome: "Corpo inteiro 2",
         exercicios: [
           { nome: "Leg Press", series: 3, reps_alvo: "10-12" },
           { nome: "Supino Inclinado (Halter)", series: 3, reps_alvo: "10-12" },
@@ -188,7 +188,7 @@ export const TEMPLATE_PACKS: TemplatePack[] = [
       },
       {
         letra: "F3",
-        nome: "Full Body 3",
+        nome: "Corpo inteiro 3",
         exercicios: [
           { nome: "Stiff", series: 3, reps_alvo: "8-10" },
           { nome: "Crossover", series: 3, reps_alvo: "12-15" },
@@ -209,7 +209,7 @@ export const TEMPLATE_PACKS: TemplatePack[] = [
         nome: "Boxe",
         exercicios: [
           { nome: "Pular corda", series: 3, reps_alvo: "3 min" },
-          { nome: "Sombra (shadow boxing)", series: 3, reps_alvo: "3 min" },
+          { nome: "Sombra (boxe)", series: 3, reps_alvo: "3 min" },
           { nome: "Saco pesado", series: 4, reps_alvo: "3 min" },
           { nome: "Manoplas / técnica", series: 3, reps_alvo: "3 min" },
           { nome: "Abdômen", series: 3, reps_alvo: "20" },

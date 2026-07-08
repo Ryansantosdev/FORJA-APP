@@ -146,7 +146,7 @@ function DeepWork() {
 
   return (
     <section className="rounded-2xl bg-surface p-6 text-center">
-      <p className="text-sm font-semibold">Modo Deep Work</p>
+      <p className="text-sm font-semibold">Foco profundo</p>
       <p className="mb-4 text-xs text-muted">{DEEP_WORK_MIN} min sem distrações</p>
       <p className={`text-6xl font-black tabular-nums ${running ? "text-primary" : ""}`}>{mm}:{ss}</p>
       {sessionDone && <p className="mt-2 text-sm font-semibold text-primary"><CheckCircle2 size={16} className="inline" /> Bloco concluído</p>}

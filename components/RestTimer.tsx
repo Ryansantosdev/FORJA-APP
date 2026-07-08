@@ -48,13 +48,13 @@ export default function RestTimer({
     <div className="fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+72px)] z-40 mx-auto max-w-md px-4">
       <div
         className={`overflow-hidden rounded-2xl border shadow-lg ${
-          done ? "border-neon bg-neon/15" : "border-line bg-elev"
+          done ? "border-primary bg-primary/15" : "border-line bg-elev"
         }`}
       >
         <div className="flex items-center gap-3 px-4 py-3">
           <TimerReset
             size={20}
-            className={done ? "animate-pulse-neon text-neon" : "text-gold"}
+            className={done ? "animate-pulse-neon text-primary" : "text-amber"}
           />
           <div className="flex-1">
             <p className="text-sm font-semibold">
@@ -62,7 +62,7 @@ export default function RestTimer({
             </p>
             <p
               className={`text-2xl font-black tabular-nums ${
-                done ? "text-neon" : ""
+                done ? "text-primary" : ""
               }`}
             >
               {mm}:{ss}
@@ -79,7 +79,7 @@ export default function RestTimer({
         <div className="h-1 bg-surface">
           <div
             className={`h-full transition-all duration-1000 ease-linear ${
-              done ? "bg-neon" : "bg-gold"
+              done ? "bg-primary" : "bg-amber"
             }`}
             style={{ width: `${pct}%` }}
           />

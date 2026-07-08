@@ -171,3 +171,62 @@ npm run dev      # preview local
 npm run build    # verificar se compila (rode antes do deploy)
 node scripts/generate-icons.mjs   # regenerar ícones azuis
 ```
+
+---
+
+## PARTE 5 — Versionamento (Git + GitHub)
+
+Fluxo recomendado: **alterar no PC → testar local → commit → push → Vercel redeploya sozinha**.
+
+### Ciclo do dia a dia
+
+```bash
+# 1. Testar localmente
+npm run dev
+# Abra http://localhost:3000 e valide as mudanças
+
+# 2. Ver o que mudou
+git status
+git diff
+
+# 3. Salvar no Git (commit)
+git add .
+git commit -m "melhora notificacoes e corrige bug X"
+
+# 4. Enviar para o GitHub
+git push
+```
+
+A Vercel detecta o push na branch `main` e faz **deploy automático** em ~1–2 min.
+
+### Pelo Cursor (interface visual)
+
+1. Barra lateral → ícone de **ramificação** (Source Control)
+2. Arquivos alterados aparecem na lista
+3. Escreva a mensagem do commit
+4. Clique **Commit**
+5. Clique **Sync Changes** ou **Push**
+
+### Regras importantes
+
+| Regra | Motivo |
+| --- | --- |
+| Nunca commitar `.env.local` | Tem suas chaves secretas |
+| Rodar `npm run build` antes do push | Evita deploy quebrado na Vercel |
+| Mensagens de commit curtas e claras | Ex: `fix login`, `ajusta agenda treino` |
+| Trabalhar na `main` (só você usa) | Simples para app pessoal |
+
+### Se o push pedir login
+
+O remote está em HTTPS. Use seu usuário GitHub e um **Personal Access Token** como senha:
+[github.com/settings/tokens](https://github.com/settings/tokens) → Generate → marque `repo`.
+
+### Variáveis locais para testar push
+
+Para testar notificações no `npm run dev`, adicione no `.env.local` (não vai pro GitHub):
+
+```
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=sua-public-key
+```
+
+As chaves privadas (`VAPID_PRIVATE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`) só precisam na **Vercel** — o disparo dos lembretes roda no servidor.

@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 
 const tabs = [
-  { href: "/", label: "Home", icon: Home },
+  { href: "/", label: "Hoje", icon: Home },
   { href: "/dieta", label: "Dieta", icon: UtensilsCrossed },
   { href: "/treino", label: "Treino", icon: Dumbbell },
   { href: "/motivacao", label: "Mente", icon: Brain },
@@ -32,7 +32,7 @@ export default function BottomNav() {
               key={href}
               href={href}
               className={`flex flex-1 flex-col items-center gap-1 py-2.5 text-[10px] font-medium transition-colors ${
-                active ? "text-neon" : "text-muted"
+                active ? "text-primary" : "text-muted"
               }`}
             >
               <Icon size={22} strokeWidth={active ? 2.4 : 1.8} />
