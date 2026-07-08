@@ -162,9 +162,34 @@ Permite que a IA do Cursor veja e gerencie seu banco.
 | **Dieta** | Cardápio editável, swipe para marcar, kcal + proteína, água |
 | **Treino** | ABC + Boxe, agenda semanal, templates, séries guiadas, timer 90s |
 | **Mente** | Insights contextuais, Deep Work 50min |
-| **Progresso** | Peso + média 7d, heatmap, volume semanal, CSV |
+| **Progresso** | Peso + média 7d, heatmap, volume semanal, CSV *(layout atual — ver roadmap abaixo)* |
 
-## Comandos úteis
+---
+
+## Roadmap — próximas partes
+
+| Parte | Foco |
+| --- | --- |
+| **3 — Layout** | Design moderno em todo o app (cards, tipografia, animações leves) |
+| **4 — Dieta** | Água em “águas”, meta em litros, proteína, swipe refinado |
+| **5 — Auth** | Esqueci senha |
+| **6 — Onboarding** | Configuração inicial multiusuário |
+| **7 — Progresso** | Tela gamificada e intuitiva (ver abaixo) |
+| **8 — Frases** | Insights contextuais por horário/comportamento |
+| **9 — Push + offline** | Notificações e uso sem rede |
+
+### Parte 7 — Progresso (“corrida ao ouro”)
+
+A tela **Progresso** precisa deixar de ser só gráficos técnicos e virar uma **jornada visual** — como uma corrida ao ouro ou corrida de campeão:
+
+- **Metas claras** — peso alvo, volume semanal, adesão dieta/treino, PRs por exercício
+- **Resultados em destaque** — o que já foi conquistado vs. o que falta (barra de progresso, marcos)
+- **Layout intuitivo** — hierarquia óbvia: “onde estou” → “para onde vou” → “histórico”
+- **Sensação de competição consigo mesmo** — streaks, recordes, badges leves, celebração ao bater meta
+- **Contexto** — cada número explicado em uma linha (ex.: volume = toneladas levantadas na semana)
+
+Implementação prevista na **parte 7** (conteúdo + gamificação) com polimento visual na **parte 3** (layout).
+
 
 ```bash
 npm run dev      # preview local

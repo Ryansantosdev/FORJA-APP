@@ -29,7 +29,8 @@ import {
 import { syncStreak, ACHIEVEMENTS } from "@/lib/streak";
 import { insightOfTheDay } from "@/lib/insights";
 import { getScheduledWorkoutId, findWorkoutById } from "@/lib/schedule";
-import { getCached, setCached } from "@/lib/cache";
+import { getCached, setCached, getCachedEntry, isCacheFresh, DAILY_TTL } from "@/lib/cache";
+import { getTreinoBundle, isTreinoCacheFresh } from "@/lib/treino-cache";
 import ProgressRing from "@/components/ProgressRing";
 import { SkeletonCard } from "@/components/Skeleton";
 import type { Workout, Meal } from "@/lib/types";
@@ -61,7 +62,10 @@ export default function Dashboard() {
   const [diarioSemana, setDiarioSemana] = useState<
     { date: string; nota: string }[]
   >([]);
-  const [loading, setLoading] = useState(!getCached("dash_resumo"));
+  const [loading, setLoading] = useState(() => {
+    const entry = getCachedEntry<Resumo>("dash_resumo");
+    return !isCacheFresh(entry, DAILY_TTL);
+  });
   const today = todayStr();
   const frase = insightOfTheDay(today);
   const hour = new Date().getHours();
@@ -69,6 +73,12 @@ export default function Dashboard() {
   const isSunday = dayOfWeek() === 0;
 
   const load = useCallback(async () => {
+    const dashEntry = getCachedEntry<Resumo>("dash_resumo");
+    if (isCacheFresh(dashEntry, DAILY_TTL) && dashEntry?.data) {
+      setResumo(dashEntry.data);
+      setLoading(false);
+    }
+
     const supabase = createClient();
     const {
       data: { user },
@@ -77,6 +87,14 @@ export default function Dashboard() {
 
     const s = await syncStreak(supabase, user.id);
     setStreak(s);
+
+    const treinoBundle = isTreinoCacheFresh() ? getTreinoBundle() : null;
+    const workoutsQuery = treinoBundle
+      ? Promise.resolve({ data: treinoBundle.workouts, error: null })
+      : supabase
+          .from("workouts")
+          .select("id, ordem, letra, nome, exercicios")
+          .eq("user_id", user.id);
 
     const [meals, mealLogs, workout, daily, settings, focus, weight, workouts, weekNotes] =
       await Promise.all([
@@ -87,7 +105,7 @@ export default function Dashboard() {
         supabase.from("user_settings").select("meta_agua_ml, meta_peso, agenda_treino, onboarding_done").eq("user_id", user.id).maybeSingle(),
         supabase.from("focus_logs").select("minutos").eq("user_id", user.id).gte("date", daysAgoStr(6)),
         supabase.from("weight_logs").select("peso").eq("user_id", user.id).eq("date", today).maybeSingle(),
-        supabase.from("workouts").select("id, ordem, letra, nome, exercicios").eq("user_id", user.id),
+        workoutsQuery,
         supabase.from("daily_logs").select("date, nota").eq("user_id", user.id).gte("date", daysAgoStr(6)).not("nota", "is", null),
       ]);
 
@@ -108,7 +126,9 @@ export default function Dashboard() {
     const metaAgua = settings.data?.meta_agua_ml ?? 3000;
     const aguaMl = daily.data?.agua_ml ?? 0;
     const treinoDone = workout.data?.concluido ?? false;
-    const agenda = (settings.data?.agenda_treino as Record<string, string | null>) ?? {};
+    const agenda =
+      treinoBundle?.agenda ??
+      ((settings.data?.agenda_treino as Record<string, string | null>) ?? {});
     const schedId = getScheduledWorkoutId(agenda);
     const sched = findWorkoutById((workouts.data as Workout[]) ?? [], schedId);
     setScheduled(sched);

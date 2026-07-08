@@ -18,34 +18,62 @@ import { createClient } from "@/lib/supabase/client";
 import { todayStr, DIAS_SEMANA, dayOfWeek } from "@/lib/dates";
 import { getScheduledWorkoutId, findWorkoutById } from "@/lib/schedule";
 import { TEMPLATE_PACKS } from "@/lib/workout-templates";
-import { getCached, setCached } from "@/lib/cache";
+import {
+  invalidateCache,
+  STATIC_DATA_TTL,
+  getCachedEntry,
+  isCacheFresh,
+} from "@/lib/cache";
+import {
+  getTreinoBundle,
+  saveTreinoBundle,
+  patchTreinoBundle,
+  TREINO_BUNDLE_KEY,
+  type TreinoBundle,
+} from "@/lib/treino-cache";
+import { supabaseErrorMessage, MIGRATION_HINT } from "@/lib/supabase-errors";
+import { insertWorkoutPack, DEFAULT_PACK_ID } from "@/lib/seed-workouts";
 import LoadState from "@/components/LoadState";
 import RestTimer from "@/components/RestTimer";
 import type { Workout, ExerciseDef } from "@/lib/types";
 
 type SerieState = Record<string, number>; // exercicio → série atual (0-based)
 
+function migrationUserMessage(code: string): string {
+  if (code === "MIGRATION_WORKOUTS") {
+    return `Tabela de treinos não encontrada. ${MIGRATION_HINT}`;
+  }
+  if (code === "MIGRATION_CONSTRAINT") {
+    return `Banco desatualizado (só aceita A/B/C). ${MIGRATION_HINT}`;
+  }
+  return code;
+}
+
 export default function TreinoPage() {
+  const initialBundle = getTreinoBundle();
   const [workouts, setWorkouts] = useState<Workout[]>(
-    () => getCached<Workout[]>("treino_workouts") ?? []
+    () => initialBundle?.workouts ?? []
   );
   const [agenda, setAgenda] = useState<Record<string, string | null>>(
-    () => getCached<Record<string, string | null>>("treino_agenda") ?? {}
+    () => initialBundle?.agenda ?? {}
   );
   const [activeId, setActiveId] = useState<string | null>(null);
   const [concluido, setConcluido] = useState(false);
   const [serieAtual, setSerieAtual] = useState<SerieState>({});
   const [lastLoads, setLastLoads] = useState<
     Record<string, { carga: number; reps: number }>
-  >({});
-  const [prs, setPrs] = useState<Record<string, number>>({});
+  >(() => initialBundle?.lastLoads ?? {});
+  const [prs, setPrs] = useState<Record<string, number>>(
+    () => initialBundle?.prs ?? {}
+  );
   const [inputs, setInputs] = useState<
     Record<string, { carga: string; reps: string }>
   >({});
   const [newPr, setNewPr] = useState<string | null>(null);
   const [timerKey, setTimerKey] = useState<number | null>(null);
-  const [loading, setLoading] = useState(!getCached("treino_workouts"));
+  const [loading, setLoading] = useState(!initialBundle?.workouts.length);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
   const [importingId, setImportingId] = useState<string | null>(null);
   const [importFeedback, setImportFeedback] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
@@ -58,104 +86,217 @@ export default function TreinoPage() {
   const scheduled = findWorkoutById(workouts, scheduledId);
   const active = findWorkoutById(workouts, activeId);
 
-  const load = useCallback(async () => {
-    setLoadError(null);
-    const hadCache = Boolean(getCached("treino_workouts"));
-    if (!hadCache) setLoading(true);
-
-    try {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const [wRes, sRes, logRes, exToday, allLogs] = await Promise.all([
-        supabase
-          .from("workouts")
-          .select("id, ordem, letra, nome, exercicios")
-          .eq("user_id", user.id)
-          .order("ordem"),
-        supabase
-          .from("user_settings")
-          .select("agenda_treino")
-          .eq("user_id", user.id)
-          .maybeSingle(),
-        supabase
-          .from("workout_logs")
-          .select("workout_id, tipo_treino, concluido")
-          .eq("user_id", user.id)
-          .eq("date", today)
-          .maybeSingle(),
-        supabase
-          .from("exercise_logs")
-          .select("exercicio")
-          .eq("user_id", user.id)
-          .eq("date", today),
-        supabase
-          .from("exercise_logs")
-          .select("exercicio, carga, reps, date")
-          .eq("user_id", user.id)
-          .order("date", { ascending: false })
-          .limit(120),
-      ]);
-
-      if (wRes.error) throw wRes.error;
-
-      const ws = (wRes.data as Workout[]) ?? [];
-      const ag = (sRes.data?.agenda_treino as Record<string, string | null>) ?? {};
-      setWorkouts(ws);
-      setAgenda(ag);
-      setCached("treino_workouts", ws);
-      setCached("treino_agenda", ag);
-
+  const applyTodayState = useCallback(
+    (
+      ws: Workout[],
+      ag: Record<string, string | null>,
+      logData: {
+        workout_id?: string | null;
+        tipo_treino?: string;
+        concluido?: boolean;
+      } | null,
+      exToday: { exercicio: string }[]
+    ) => {
       const schedId = getScheduledWorkoutId(ag);
       let nextActive: string | null = null;
-      if (logRes.data?.workout_id && ws.some((w) => w.id === logRes.data!.workout_id)) {
-        nextActive = logRes.data.workout_id;
-        setConcluido(logRes.data.concluido);
+      if (
+        logData?.workout_id &&
+        ws.some((w) => w.id === logData.workout_id)
+      ) {
+        nextActive = logData.workout_id;
+        setConcluido(logData.concluido ?? false);
       } else if (schedId && ws.some((w) => w.id === schedId)) {
         nextActive = schedId;
-        setConcluido(logRes.data?.concluido ?? false);
+        setConcluido(logData?.concluido ?? false);
       } else {
         setConcluido(false);
       }
       setActiveId(nextActive);
 
-      const last: Record<string, { carga: number; reps: number }> = {};
-      const maxes: Record<string, number> = {};
-      for (const log of allLogs.data ?? []) {
-        if (!last[log.exercicio])
-          last[log.exercicio] = { carga: Number(log.carga), reps: log.reps };
-        maxes[log.exercicio] = Math.max(
-          maxes[log.exercicio] ?? 0,
-          Number(log.carga)
-        );
-      }
-      setLastLoads(last);
-      setPrs(maxes);
-
       const series: SerieState = {};
-      for (const ex of exToday.data ?? []) {
+      for (const ex of exToday) {
         series[ex.exercicio] = (series[ex.exercicio] ?? 0) + 1;
       }
       setSerieAtual(series);
-    } catch (e) {
-      const msg =
-        e && typeof e === "object" && "message" in e
-          ? String((e as { message: string }).message)
-          : "Erro ao carregar treinos.";
-      if (msg.includes("workouts") || msg.includes("schema")) {
-        setLoadError(
-          "Tabela de treinos não encontrada. Rode supabase/migration-v2.sql no Supabase."
-        );
-      } else {
-        setLoadError(msg.includes("demorou") ? msg : "Não foi possível carregar. Verifique a conexão.");
+    },
+    []
+  );
+
+  const syncToday = useCallback(
+    async (
+      supabase: ReturnType<typeof createClient>,
+      userId: string,
+      ws: Workout[],
+      ag: Record<string, string | null>
+    ) => {
+      const [logRes, exToday] = await Promise.all([
+        supabase
+          .from("workout_logs")
+          .select("workout_id, tipo_treino, concluido")
+          .eq("user_id", userId)
+          .eq("date", today)
+          .maybeSingle(),
+        supabase
+          .from("exercise_logs")
+          .select("exercicio")
+          .eq("user_id", userId)
+          .eq("date", today),
+      ]);
+      applyTodayState(ws, ag, logRes.data, exToday.data ?? []);
+    },
+    [today, applyTodayState]
+  );
+
+  const load = useCallback(
+    async (force = false) => {
+      setLoadError(null);
+      setOfflineNotice(null);
+
+      const entry = getCachedEntry<TreinoBundle>(TREINO_BUNDLE_KEY);
+      const cached = entry?.data ?? getTreinoBundle();
+      const cacheOk =
+        !force &&
+        isCacheFresh(entry, STATIC_DATA_TTL) &&
+        Boolean(cached?.workouts.length);
+
+      if (cacheOk && cached) {
+        setWorkouts(cached.workouts);
+        setAgenda(cached.agenda);
+        setLastLoads(cached.lastLoads);
+        setPrs(cached.prs);
+        setLoading(false);
+
+        try {
+          const supabase = createClient();
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+          if (user) await syncToday(supabase, user.id, cached.workouts, cached.agenda);
+        } catch {
+          // cache já exibido; sync do dia falhou em silêncio
+        }
+        return;
       }
-    } finally {
-      setLoading(false);
-    }
-  }, [today]);
+
+      if (!cached?.workouts.length) setLoading(true);
+
+      try {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const [wRes, sRes, logRes, exToday, allLogs] = await Promise.all([
+          supabase
+            .from("workouts")
+            .select("id, ordem, letra, nome, exercicios")
+            .eq("user_id", user.id)
+            .order("ordem"),
+          supabase
+            .from("user_settings")
+            .select("agenda_treino")
+            .eq("user_id", user.id)
+            .maybeSingle(),
+          supabase
+            .from("workout_logs")
+            .select("workout_id, tipo_treino, concluido")
+            .eq("user_id", user.id)
+            .eq("date", today)
+            .maybeSingle(),
+          supabase
+            .from("exercise_logs")
+            .select("exercicio")
+            .eq("user_id", user.id)
+            .eq("date", today),
+          supabase
+            .from("exercise_logs")
+            .select("exercicio, carga, reps, date")
+            .eq("user_id", user.id)
+            .order("date", { ascending: false })
+            .limit(120),
+        ]);
+
+        if (wRes.error) throw wRes.error;
+
+        let ws = (wRes.data as Workout[]) ?? [];
+        const ag =
+          (sRes.data?.agenda_treino as Record<string, string | null>) ?? {};
+
+        if (ws.length === 0) {
+          const seed = await insertWorkoutPack(
+            supabase,
+            user.id,
+            DEFAULT_PACK_ID
+          );
+          if (seed.ok) {
+            const refetch = await supabase
+              .from("workouts")
+              .select("id, ordem, letra, nome, exercicios")
+              .eq("user_id", user.id)
+              .order("ordem");
+            if (!refetch.error) ws = (refetch.data as Workout[]) ?? [];
+          }
+        }
+
+        const last: Record<string, { carga: number; reps: number }> = {};
+        const maxes: Record<string, number> = {};
+        for (const log of allLogs.data ?? []) {
+          if (!last[log.exercicio])
+            last[log.exercicio] = {
+              carga: Number(log.carga),
+              reps: log.reps,
+            };
+          maxes[log.exercicio] = Math.max(
+            maxes[log.exercicio] ?? 0,
+            Number(log.carga)
+          );
+        }
+
+        const bundle: TreinoBundle = {
+          workouts: ws,
+          agenda: ag,
+          lastLoads: last,
+          prs: maxes,
+        };
+        saveTreinoBundle(bundle);
+        setWorkouts(ws);
+        setAgenda(ag);
+        setLastLoads(last);
+        setPrs(maxes);
+        applyTodayState(ws, ag, logRes.data, exToday.data ?? []);
+      } catch (e) {
+        const code = supabaseErrorMessage(e);
+        const fallback = cached ?? getTreinoBundle();
+
+        if (fallback?.workouts.length) {
+          setWorkouts(fallback.workouts);
+          setAgenda(fallback.agenda);
+          setLastLoads(fallback.lastLoads);
+          setPrs(fallback.prs);
+          setLoadError(null);
+          if (code === "MIGRATION_WORKOUTS" || code === "MIGRATION_CONSTRAINT") {
+            setOfflineNotice(
+              `Treinos do celular. Para importar/criar novos: ${MIGRATION_HINT}`
+            );
+          } else {
+            setOfflineNotice("Usando treinos salvos no celular.");
+          }
+        } else if (code === "MIGRATION_WORKOUTS" || code === "MIGRATION_CONSTRAINT") {
+          setLoadError(migrationUserMessage(code));
+        } else {
+          setLoadError(
+            code.includes("demorou")
+              ? code
+              : "Não foi possível carregar. Verifique a conexão."
+          );
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [today, applyTodayState, syncToday]
+  );
 
   useEffect(() => {
     load();
@@ -169,16 +310,22 @@ export default function TreinoPage() {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase.from("workout_logs").upsert(
-      {
-        user_id: user.id,
-        date: today,
-        tipo_treino: w.letra,
-        workout_id: w.id,
-        concluido: false,
-      },
+
+    const base = {
+      user_id: user.id,
+      date: today,
+      tipo_treino: w.letra,
+      concluido: false,
+    };
+    const { error } = await supabase.from("workout_logs").upsert(
+      { ...base, workout_id: w.id },
       { onConflict: "user_id,date" }
     );
+    if (error?.message?.includes("workout_id")) {
+      await supabase.from("workout_logs").upsert(base, {
+        onConflict: "user_id,date",
+      });
+    }
   }
 
   async function registrarSerie(ex: ExerciseDef) {
@@ -202,12 +349,15 @@ export default function TreinoPage() {
     });
 
     const prAnt = prs[ex.nome] ?? 0;
+    const newPrs = { ...prs, [ex.nome]: Math.max(prAnt, carga) };
+    const newLast = { ...lastLoads, [ex.nome]: { carga, reps } };
     if (carga > prAnt) {
       setNewPr(ex.nome);
       setTimeout(() => setNewPr(null), 4000);
     }
-    setPrs({ ...prs, [ex.nome]: Math.max(prAnt, carga) });
-    setLastLoads({ ...lastLoads, [ex.nome]: { carga, reps } });
+    setPrs(newPrs);
+    setLastLoads(newLast);
+    patchTreinoBundle({ prs: newPrs, lastLoads: newLast });
     setSerieAtual({ ...serieAtual, [ex.nome]: (serieAtual[ex.nome] ?? 0) + 1 });
     setInputs({ ...inputs, [ex.nome]: { carga: "", reps: "" } });
     setTimerKey(Date.now());
@@ -220,23 +370,28 @@ export default function TreinoPage() {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase.from("workout_logs").upsert(
-      {
-        user_id: user.id,
-        date: today,
-        tipo_treino: active.letra,
-        workout_id: active.id,
-        concluido: true,
-      },
+    const base = {
+      user_id: user.id,
+      date: today,
+      tipo_treino: active.letra,
+      concluido: true,
+    };
+    const { error } = await supabase.from("workout_logs").upsert(
+      { ...base, workout_id: active.id },
       { onConflict: "user_id,date" }
     );
+    if (error?.message?.includes("workout_id")) {
+      await supabase.from("workout_logs").upsert(base, {
+        onConflict: "user_id,date",
+      });
+    }
     setConcluido(true);
     setTimerKey(null);
   }
 
   async function salvarAgenda(nova: Record<string, string | null>) {
     setAgenda(nova);
-    setCached("treino_agenda", nova);
+    patchTreinoBundle({ agenda: nova });
     const supabase = createClient();
     const {
       data: { user },
@@ -270,30 +425,25 @@ export default function TreinoPage() {
 
     try {
       const startOrdem = workouts.length;
-      for (let i = 0; i < pack.treinos.length; i++) {
-        const t = pack.treinos[i];
-        const { error } = await supabase.from("workouts").insert({
-          user_id: user.id,
-          ordem: startOrdem + i + 1,
-          letra: t.letra,
-          nome: t.nome,
-          exercicios: t.exercicios,
-        });
-        if (error) throw error;
-      }
+      const result = await insertWorkoutPack(
+        supabase,
+        user.id,
+        packId,
+        startOrdem
+      );
+      if (!result.ok) throw new Error(result.error ?? "Falha ao importar.");
+
+      invalidateCache(TREINO_BUNDLE_KEY);
       setImportFeedback(`Modelo "${pack.nome}" importado com sucesso.`);
       setShowTemplates(false);
       setEditMode(false);
-      await load();
+      await load(true);
     } catch (e) {
-      const err =
-        e && typeof e === "object" && "message" in e
-          ? String((e as { message: string }).message)
-          : "Falha ao importar.";
+      const code = supabaseErrorMessage(e);
       setImportFeedback(
-        err.includes("workouts")
-          ? "Erro: rode migration-v2.sql no Supabase (tabela workouts)."
-          : `Erro: ${err}`
+        code === "MIGRATION_WORKOUTS" || code === "MIGRATION_CONSTRAINT"
+          ? migrationUserMessage(code)
+          : `Erro: ${code}`
       );
     } finally {
       setImportingId(null);
@@ -306,23 +456,36 @@ export default function TreinoPage() {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return;
-    if (w.id === "nova") {
-      await supabase.from("workouts").insert({
-        user_id: user.id,
-        ordem: workouts.length + 1,
-        letra: w.letra,
-        nome: w.nome,
-        exercicios: w.exercicios,
-      });
-    } else {
-      await supabase
-        .from("workouts")
-        .update({ letra: w.letra, nome: w.nome, exercicios: w.exercicios })
-        .eq("id", w.id)
-        .eq("user_id", user.id);
+
+    try {
+      if (w.id === "nova") {
+        const { error } = await supabase.from("workouts").insert({
+          user_id: user.id,
+          ordem: workouts.length + 1,
+          letra: w.letra,
+          nome: w.nome,
+          exercicios: w.exercicios,
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("workouts")
+          .update({ letra: w.letra, nome: w.nome, exercicios: w.exercicios })
+          .eq("id", w.id)
+          .eq("user_id", user.id);
+        if (error) throw error;
+      }
+      setEditing(null);
+      invalidateCache(TREINO_BUNDLE_KEY);
+      await load(true);
+    } catch (e) {
+      const code = supabaseErrorMessage(e);
+      setImportFeedback(
+        code === "MIGRATION_WORKOUTS" || code === "MIGRATION_CONSTRAINT"
+          ? migrationUserMessage(code)
+          : `Erro ao salvar: ${code}`
+      );
     }
-    setEditing(null);
-    load();
   }
 
   async function excluirWorkout(id: string) {
@@ -334,7 +497,8 @@ export default function TreinoPage() {
     if (!user) return;
     await supabase.from("workouts").delete().eq("id", id).eq("user_id", user.id);
     setEditing(null);
-    load();
+    invalidateCache(TREINO_BUNDLE_KEY);
+    load(true);
   }
 
   const isBoxe = active?.letra === "BX";
@@ -421,10 +585,16 @@ export default function TreinoPage() {
         </p>
       )}
 
+      {offlineNotice && (
+        <p className="rounded-xl border border-amber/30 bg-amber/10 px-4 py-2 text-sm text-amber">
+          {offlineNotice}
+        </p>
+      )}
+
       <LoadState
         loading={loading}
         error={loadError}
-        onRetry={() => load()}
+        onRetry={() => load(true)}
         empty={!loading && !loadError && workouts.length === 0}
         emptyTitle="Nenhum treino cadastrado"
         emptyDesc="Importe um modelo pronto ou crie seu primeiro treino."

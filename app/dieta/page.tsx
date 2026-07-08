@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { todayStr, yesterdayStr, isRetroactiveWindow } from "@/lib/dates";
-import { getCached, setCached } from "@/lib/cache";
+import { getCached, setCached, getCachedEntry, isCacheFresh, STATIC_DATA_TTL } from "@/lib/cache";
 import SwipeCard from "@/components/SwipeCard";
 import LoadState from "@/components/LoadState";
 import type { Meal, MealItem } from "@/lib/types";
@@ -59,9 +59,12 @@ export default function DietaPage() {
   const today = todayStr();
   const [activeDate, setActiveDate] = useState(() => todayStr());
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     setLoadError(null);
-    const hadCache = Boolean(readDietaCache());
+    const entry = getCachedEntry<DietaCache>("dieta_data");
+    const hadCache = Boolean(entry?.data.meals.length);
+    const mealsFresh = !force && isCacheFresh(entry, STATIC_DATA_TTL) && hadCache;
+
     if (!hadCache) setLoading(true);
 
     try {
@@ -70,6 +73,42 @@ export default function DietaPage() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) return;
+
+      if (mealsFresh && entry) {
+        const [logsRes, dailyRes] = await Promise.all([
+          supabase
+            .from("meal_logs")
+            .select("meal_id")
+            .eq("user_id", user.id)
+            .eq("date", activeDate),
+          activeDate === today
+            ? supabase
+                .from("daily_logs")
+                .select("agua_ml")
+                .eq("user_id", user.id)
+                .eq("date", today)
+                .maybeSingle()
+            : Promise.resolve({ data: null, error: null }),
+        ]);
+
+        const doneIds = logsRes.data?.map((l) => l.meal_id) ?? [];
+        const agua =
+          activeDate === today ? (dailyRes.data?.agua_ml ?? entry.data.aguaMl) : aguaMl;
+
+        setMeals(entry.data.meals);
+        setDone(new Set(doneIds));
+        if (activeDate === today) setAguaMl(agua);
+        setMetaAgua(entry.data.metaAgua);
+        setCopoMl(entry.data.copoMl);
+        setCached("dieta_data", {
+          meals: entry.data.meals,
+          doneIds,
+          aguaMl: agua,
+          metaAgua: entry.data.metaAgua,
+          copoMl: entry.data.copoMl,
+        });
+        return;
+      }
 
       const [mealsRes, logsRes, dailyRes, settingsRes] = await Promise.all([
         supabase
