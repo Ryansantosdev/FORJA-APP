@@ -1,0 +1,173 @@
+# FORJA — Dieta, Treino e Disciplina
+
+PWA pessoal: dieta, treino ABC + Boxe, peso, foco e motivação. Next.js + Supabase.
+
+---
+
+## ANTES DE TUDO — Rodar a migração v2 no Supabase
+
+Se você já rodou o `schema.sql` antes, rode também o arquivo **`supabase/migration-v2.sql`** no SQL Editor do Supabase. Ele adiciona:
+
+- Tabela `workouts` (treinos editáveis, incluindo **Boxe**)
+- Agenda semanal (qual treino em cada dia)
+- Lembretes de água em 5 horários fixos
+- Campo `onboarding_done`
+
+---
+
+## PARTE 1 — Configurar o Supabase (se ainda não fez)
+
+1. [supabase.com](https://supabase.com) → criar projeto
+2. **Settings → API Keys** → copiar URL e anon key
+3. Criar `.env.local` na raiz (copie de `.env.example`):
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://SEU-PROJETO.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=sua-chave-aqui
+```
+
+4. **SQL Editor** → rodar `supabase/schema.sql` e depois `supabase/migration-v2.sql`
+5. **Authentication → Providers → Email** → desligar "Confirm email"
+6. Criar sua conta no app (ou no painel Authentication → Users)
+
+---
+
+## PARTE 2 — Testar localmente (preview)
+
+No terminal do Cursor, na pasta do projeto:
+
+```bash
+npm install
+npm run dev
+```
+
+Abra **http://localhost:3000**
+
+- Primeira vez: onboarding (peso, meta, água)
+- **Treino**: ícone de calendário = agenda da semana (Seg A, Ter B, Qua C, Qui Boxe...)
+- **Dieta**: deslize o card para a direita para marcar · botão "Ontem" até 9h
+- Simular iPhone: F12 → ícone de celular
+
+Para parar: `Ctrl+C` no terminal.
+
+> O modo `npm run dev` é mais lento que a versão publicada. Na Vercel o app abre bem mais rápido.
+
+---
+
+## PARTE 3 — Deploy na Vercel (passo a passo)
+
+### 3.1 — Subir o código para o GitHub
+
+1. Crie uma conta em [github.com](https://github.com) se não tiver
+2. No Cursor, abra o terminal e rode:
+
+```bash
+git init
+git add .
+git commit -m "Forja PWA v1"
+```
+
+3. No GitHub, crie um repositório novo (ex: `forja-app`) — **sem** README
+4. Conecte e envie:
+
+```bash
+git remote add origin https://github.com/SEU-USUARIO/forja-app.git
+git branch -M main
+git push -u origin main
+```
+
+### 3.2 — Publicar na Vercel
+
+1. Acesse [vercel.com](https://vercel.com) e entre com sua conta do **GitHub**
+2. Clique em **Add New → Project**
+3. Importe o repositório `forja-app`
+4. Em **Environment Variables**, adicione (copie do seu `.env.local`):
+
+| Nome | Valor |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | sua URL do Supabase |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | sua anon key |
+
+5. Clique **Deploy** e aguarde ~2 minutos
+6. A Vercel te dá uma URL tipo `forja-app.vercel.app` — **esse é seu app online**
+
+### 3.3 — Instalar no iPhone
+
+1. Abra a URL da Vercel no **Safari** (não no Chrome)
+2. Toque em **Compartilhar** (ícone de quadrado com seta)
+3. **Adicionar à Tela de Início**
+4. O app abre em tela cheia, como nativo
+
+### 3.4 — Notificações push (opcional, após deploy)
+
+1. No terminal local, gere chaves VAPID:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+2. No painel da **Vercel** → seu projeto → **Settings → Environment Variables**, adicione:
+
+| Nome | Valor |
+| --- | --- |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Public Key gerada |
+| `VAPID_PRIVATE_KEY` | Private Key gerada |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API → service_role (secreta!) |
+| `CRON_SECRET` | invente uma senha longa (ex: 30 caracteres aleatórios) |
+
+3. **Redeploy**: Vercel → Deployments → ⋯ → Redeploy
+4. No app instalado no iPhone: **Configurações → Ativar notificações**
+5. Os lembretes de água (5× ao dia) e metas (21h) passam a funcionar via cron horário da Vercel
+
+---
+
+## PARTE 4 — MCP do Supabase no Cursor (opcional)
+
+Permite que a IA do Cursor veja e gerencie seu banco.
+
+1. Supabase → avatar → **Account preferences → Access Tokens** → Generate → copie o token
+2. Pegue o **project ref** na URL do painel (`supabase.com/dashboard/project/SEU-REF`)
+3. Cursor → **Settings → MCP → Add new global MCP server**
+4. Cole no `mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "supabase": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--project-ref=SEU-PROJECT-REF"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "SEU-TOKEN"
+      }
+    }
+  }
+}
+```
+
+5. Salve. Bolinha verde = conectado.
+
+---
+
+## Funcionalidades
+
+| Aba | O que faz |
+| --- | --- |
+| **Hoje** | Anel de progresso, streak, próxima ação, peso, diário |
+| **Dieta** | Cardápio editável, swipe para marcar, kcal + proteína, água |
+| **Treino** | ABC + Boxe, agenda semanal, templates, séries guiadas, timer 90s |
+| **Mente** | Insights contextuais, Deep Work 50min |
+| **Progresso** | Peso + média 7d, heatmap, volume semanal, CSV |
+
+## Comandos úteis
+
+```bash
+npm run dev      # preview local
+npm run build    # verificar se compila (rode antes do deploy)
+node scripts/generate-icons.mjs   # regenerar ícones azuis
+```
