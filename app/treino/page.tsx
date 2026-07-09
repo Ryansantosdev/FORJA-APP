@@ -9,7 +9,6 @@ import {
   Calendar,
   Plus,
   Pencil,
-  X,
   Trash2,
   Download,
   ChevronRight,
@@ -35,6 +34,7 @@ import { supabaseErrorMessage, MIGRATION_HINT } from "@/lib/supabase-errors";
 import { insertWorkoutPack, DEFAULT_PACK_ID } from "@/lib/seed-workouts";
 import LoadState from "@/components/LoadState";
 import RestTimer from "@/components/RestTimer";
+import BottomSheet from "@/components/BottomSheet";
 import BentoCard, { BentoLabel } from "@/components/BentoCard";
 import RangeBar from "@/components/RangeBar";
 import type { Workout, ExerciseDef } from "@/lib/types";
@@ -893,35 +893,24 @@ export default function TreinoPage() {
       </LoadState>
 
       {showTemplates && (
-        <div
-          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/70"
-          onClick={() => !importingId && setShowTemplates(false)}
+        <BottomSheet
+          title="Modelos de treino"
+          onClose={() => !importingId && setShowTemplates(false)}
         >
-          <div
-            className="max-h-[80dvh] w-full max-w-md overflow-y-auto rounded-t-3xl border-t border-white/10 bg-[#0a0a0c] p-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-bold">Modelos de treino</h2>
-              <button onClick={() => setShowTemplates(false)} disabled={!!importingId}>
-                <X size={20} />
-              </button>
-            </div>
-            {TEMPLATE_PACKS.map((p) => (
-              <button
-                key={p.id}
-                disabled={!!importingId}
-                onClick={() => importarTemplate(p.id)}
-                className="btn-ghost mb-2 w-full p-4 text-left disabled:opacity-50"
-              >
-                <p className="font-semibold">
-                  {importingId === p.id ? "Importando..." : p.nome}
-                </p>
-                <p className="text-xs text-muted">{p.descricao}</p>
-              </button>
-            ))}
-          </div>
-        </div>
+          {TEMPLATE_PACKS.map((p) => (
+            <button
+              key={p.id}
+              disabled={!!importingId}
+              onClick={() => importarTemplate(p.id)}
+              className="btn-ghost mb-2 w-full p-4 text-left disabled:opacity-50"
+            >
+              <p className="font-semibold">
+                {importingId === p.id ? "Importando..." : p.nome}
+              </p>
+              <p className="text-xs text-muted">{p.descricao}</p>
+            </button>
+          ))}
+        </BottomSheet>
       )}
 
       {editing && (
@@ -956,28 +945,44 @@ function WorkoutEditor({
   const [exs, setExs] = useState<ExerciseDef[]>(workout.exercicios);
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/70">
-      <div className="max-h-[88dvh] w-full max-w-md overflow-y-auto rounded-t-3xl border-t border-white/10 bg-[#0a0a0c] p-5 pb-[calc(env(safe-area-inset-bottom)+20px)]">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-bold">
-            {workout.id === "nova" ? "Novo treino" : "Editar treino"}
-          </h2>
-          <button onClick={onClose}>
-            <X size={20} />
+    <BottomSheet
+      title={workout.id === "nova" ? "Novo treino" : "Editar treino"}
+      onClose={onClose}
+      footer={
+        <div className="flex gap-2">
+          {onDelete && (
+            <button
+              onClick={onDelete}
+              className="btn-ghost border border-danger/40 px-4 py-3 text-sm text-danger"
+            >
+              Excluir
+            </button>
+          )}
+          <button
+            onClick={() =>
+              letra.trim() &&
+              nome.trim() &&
+              onSave({ ...workout, letra, nome, exercicios: exs })
+            }
+            className="btn-primary flex-1 py-3"
+          >
+            Salvar
           </button>
         </div>
+      }
+    >
         <div className="mb-3 flex gap-2">
           <input
             value={letra}
             onChange={(e) => setLetra(e.target.value.toUpperCase())}
             placeholder="Letra (A, BX...)"
-            className="w-24 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3 text-center outline-none focus:border-primary"
+            className="input-field w-24 px-3 py-3 text-center"
           />
           <input
             value={nome}
             onChange={(e) => setNome(e.target.value)}
             placeholder="Nome do treino"
-            className="flex-1 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3 outline-none focus:border-primary"
+            className="input-field min-w-0 flex-1 px-3 py-3"
           />
         </div>
         {exs.map((ex, i) => (
@@ -989,7 +994,7 @@ function WorkoutEditor({
                   setExs(exs.map((x, j) => (j === i ? { ...x, nome: e.target.value } : x)))
                 }
                 placeholder="Exercício"
-                className="flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm"
+                className="input-field min-w-0 flex-1 px-3 py-2 text-sm"
               />
               <button onClick={() => setExs(exs.filter((_, j) => j !== i))}>
                 <Trash2 size={16} className="text-danger" />
@@ -1006,7 +1011,7 @@ function WorkoutEditor({
                     )
                   )
                 }
-                className="w-16 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-2 text-sm text-center"
+                className="input-field w-16 px-2 py-2 text-center text-sm"
               />
               <span className="self-center text-xs text-muted">séries</span>
               <input
@@ -1019,7 +1024,7 @@ function WorkoutEditor({
                   )
                 }
                 placeholder="8-10 ou 3 min"
-                className="flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm"
+                className="input-field min-w-0 flex-1 px-3 py-2 text-sm"
               />
             </div>
           </div>
@@ -1028,29 +1033,10 @@ function WorkoutEditor({
           onClick={() =>
             setExs([...exs, { nome: "", series: 3, reps_alvo: "8-10" }])
           }
-          className="btn-ghost mb-4 w-full border border-dashed border-white/15 py-3 text-sm"
+          className="btn-ghost w-full border border-dashed border-white/15 py-3 text-sm"
         >
           + Exercício
         </button>
-        <div className="flex gap-2">
-          {onDelete && (
-            <button
-              onClick={onDelete}
-              className="btn-ghost border border-danger/40 px-4 py-3 text-sm text-danger"
-            >
-              Excluir
-            </button>
-          )}
-          <button
-            onClick={() =>
-              letra.trim() && nome.trim() && onSave({ ...workout, letra, nome, exercicios: exs })
-            }
-            className="btn-primary flex-1 py-3"
-          >
-            Salvar
-          </button>
-        </div>
-      </div>
-    </div>
+    </BottomSheet>
   );
 }

@@ -2,9 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Flame, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { todayStr } from "@/lib/dates";
+import { formatLitersFromMl } from "@/lib/format";
+import BentoCard, { BentoLabel } from "@/components/BentoCard";
+import RangeBar from "@/components/RangeBar";
+import ForjaLogo from "@/components/ForjaLogo";
 
 const STEPS = [
   { title: "Peso atual", desc: "De onde você parte.", field: "peso" as const },
@@ -23,7 +27,9 @@ export default function OnboardingPage() {
   async function finish() {
     setLoading(true);
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) return;
 
     const pesoNum = parseFloat(peso.replace(",", "."));
@@ -47,64 +53,73 @@ export default function OnboardingPage() {
   }
 
   const s = STEPS[step];
+  const pct = Math.round(((step + 1) / STEPS.length) * 100);
 
   return (
     <div className="flex min-h-[85dvh] flex-col justify-center">
-      <div className="mb-8 text-center">
-        <Flame size={40} className="mx-auto mb-2 text-primary" />
-        <p className="text-xs text-muted">
+      <div className="mb-6 text-center">
+        <div className="mb-4 flex justify-center">
+          <ForjaLogo size={72} />
+        </div>
+        <p className="section-label">
           Passo {step + 1} de {STEPS.length}
         </p>
+        <RangeBar pct={pct} color="white" />
       </div>
 
-      <h1 className="mb-1 text-2xl font-bold">{s.title}</h1>
-      <p className="mb-6 text-sm text-muted">{s.desc}</p>
+      <BentoCard variant="violet" className="!min-h-0" span={2}>
+        <BentoLabel>{s.title}</BentoLabel>
+        <p className="mb-4 text-sm text-white/55">{s.desc}</p>
 
-      {s.field === "peso" && (
-        <input
-          type="number"
-          inputMode="decimal"
-          autoFocus
-          placeholder="ex: 105.0"
-          value={peso}
-          onChange={(e) => setPeso(e.target.value)}
-          className="mb-6 w-full rounded-2xl border border-line bg-surface px-5 py-4 text-2xl font-bold text-center outline-none focus:border-primary"
-        />
-      )}
-      {s.field === "meta" && (
-        <input
-          type="number"
-          inputMode="decimal"
-          autoFocus
-          placeholder="ex: 90.0"
-          value={meta}
-          onChange={(e) => setMeta(e.target.value)}
-          className="mb-6 w-full rounded-2xl border border-line bg-surface px-5 py-4 text-2xl font-bold text-center outline-none focus:border-primary"
-        />
-      )}
-      {s.field === "agua" && (
-        <div className="mb-6">
+        {s.field === "peso" && (
           <input
             type="number"
-            inputMode="numeric"
+            inputMode="decimal"
             autoFocus
-            value={agua}
-            onChange={(e) => setAgua(e.target.value)}
-            className="w-full rounded-2xl border border-line bg-surface px-5 py-4 text-2xl font-bold text-center outline-none focus:border-primary"
+            placeholder="ex: 105.0"
+            value={peso}
+            onChange={(e) => setPeso(e.target.value)}
+            className="input-field w-full px-5 py-4 text-center text-2xl font-bold"
           />
-          <p className="mt-2 text-center text-xs text-muted">
-            = {((parseInt(agua) || 0) / 1000).toFixed(1)} litros
-          </p>
-        </div>
-      )}
+        )}
+        {s.field === "meta" && (
+          <input
+            type="number"
+            inputMode="decimal"
+            autoFocus
+            placeholder="ex: 90.0"
+            value={meta}
+            onChange={(e) => setMeta(e.target.value)}
+            className="input-field w-full px-5 py-4 text-center text-2xl font-bold"
+          />
+        )}
+        {s.field === "agua" && (
+          <>
+            <input
+              type="number"
+              inputMode="numeric"
+              autoFocus
+              value={agua}
+              onChange={(e) => setAgua(e.target.value)}
+              className="input-field w-full px-5 py-4 text-center text-2xl font-bold"
+            />
+            <p className="mt-2 text-center text-xs text-white/45">
+              = {formatLitersFromMl(parseInt(agua) || 0)}
+            </p>
+          </>
+        )}
+      </BentoCard>
 
       <button
+        type="button"
         onClick={() => (step < STEPS.length - 1 ? setStep(step + 1) : finish())}
         disabled={loading || (step === 0 && !peso)}
-        className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-4 font-bold text-black disabled:opacity-50"
+        className="btn-primary mt-4 flex w-full items-center justify-center gap-2 py-4 disabled:opacity-50"
       >
         {step < STEPS.length - 1 ? (
-          <>Continuar <ChevronRight size={18} /></>
+          <>
+            Continuar <ChevronRight size={18} />
+          </>
         ) : loading ? (
           "Salvando..."
         ) : (

@@ -42,6 +42,10 @@ export type UserSettings = {
   agua_lembrete_horas: number[];
   hora_lembrete_metas: number;
   lembretes_ativos: boolean;
+  frase_lembrete_ativo: boolean;
+  frase_lembrete_intervalo_min: number;
+  frase_lembrete_inicio: number;
+  frase_lembrete_fim: number;
   agenda_treino: Record<string, string | null>;
   onboarding_done?: boolean;
 };

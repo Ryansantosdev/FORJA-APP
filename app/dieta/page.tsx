@@ -10,7 +10,6 @@ import {
   Plus,
   Pencil,
   Trash2,
-  X,
   ChevronDown,
   Repeat,
 } from "lucide-react";
@@ -28,6 +27,7 @@ import LoadState from "@/components/LoadState";
 import BentoCard, { BentoLabel, BentoValue } from "@/components/BentoCard";
 import RangeBar from "@/components/RangeBar";
 import WaterTracker from "@/components/WaterTracker";
+import BottomSheet from "@/components/BottomSheet";
 import { showToast } from "@/lib/toast";
 import type { Meal, MealItem } from "@/lib/types";
 
@@ -657,22 +657,31 @@ function MealEditor({
   const totalKcal = itens.reduce((a, i) => a + (i.kcal || 0), 0);
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/75 backdrop-blur-sm">
-      <div className="max-h-[88dvh] w-full max-w-md overflow-y-auto rounded-t-3xl border-t border-white/10 bg-[#0a0a0c] p-5 pb-[calc(env(safe-area-inset-bottom)+20px)]">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-bold">
-              {meal.id === "nova" ? "Nova refeição" : "Editar refeição"}
-            </h2>
-            <p className="text-xs text-muted">
-              {totalKcal} kcal · {totalProt}g prot
-            </p>
-          </div>
-          <button onClick={onClose} className="btn-ghost p-2" aria-label="Fechar">
-            <X size={20} />
+    <BottomSheet
+      title={meal.id === "nova" ? "Nova refeição" : "Editar refeição"}
+      subtitle={`${totalKcal} kcal · ${totalProt}g prot`}
+      onClose={onClose}
+      footer={
+        <div className="flex gap-2">
+          {onDelete && (
+            <button
+              onClick={onDelete}
+              className="btn-ghost border border-danger/40 px-4 py-3 text-sm font-semibold text-danger"
+            >
+              Excluir
+            </button>
+          )}
+          <button
+            onClick={() =>
+              nome.trim() && onSave({ ...meal, nome: nome.trim(), itens })
+            }
+            className="btn-primary flex-1 py-3"
+          >
+            Salvar
           </button>
         </div>
-
+      }
+    >
         <label className="section-label mb-1 block">Nome</label>
         <input
           value={nome}
@@ -758,26 +767,6 @@ function MealEditor({
         >
           <Plus size={16} /> Adicionar item
         </button>
-
-        <div className="mt-5 flex gap-2">
-          {onDelete && (
-            <button
-              onClick={onDelete}
-              className="btn-ghost border border-danger/40 px-4 py-3 text-sm font-semibold text-danger"
-            >
-              Excluir
-            </button>
-          )}
-          <button
-            onClick={() =>
-              nome.trim() && onSave({ ...meal, nome: nome.trim(), itens })
-            }
-            className="btn-primary flex-1 py-3"
-          >
-            Salvar
-          </button>
-        </div>
-      </div>
-    </div>
+    </BottomSheet>
   );
 }

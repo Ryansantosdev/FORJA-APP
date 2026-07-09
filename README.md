@@ -4,14 +4,27 @@ PWA pessoal: dieta, treino ABC + Boxe, peso, foco e motivação. Next.js + Supab
 
 ---
 
-## ANTES DE TUDO — Rodar a migração v2 no Supabase
+## ANTES DE TUDO — Migrações no Supabase
 
-Se você já rodou o `schema.sql` antes, rode também o arquivo **`supabase/migration-v2.sql`** no SQL Editor do Supabase. Ele adiciona:
+Se você já rodou o `schema.sql` antes, rode também no **SQL Editor** (pode rodar mais de uma vez):
 
-- Tabela `workouts` (treinos editáveis, incluindo **Boxe**)
-- Agenda semanal (qual treino em cada dia)
-- Lembretes de água em 5 horários fixos
-- Campo `onboarding_done`
+| Arquivo | O que adiciona |
+| --- | --- |
+| `supabase/migration-v2.sql` | Treinos editáveis, agenda semanal, lembretes de água |
+| `supabase/migration-v3.sql` | Meta de proteína (g/dia) |
+| `supabase/migration-v4.sql` | Lembretes de **frases** (intervalo, horário 8h–21h) |
+
+---
+
+## Ícone e logo FORJA
+
+O ícone oficial fica em `assets/forja-icon-source.png`. Para regenerar os PNGs do PWA:
+
+```bash
+node scripts/generate-icons.mjs
+```
+
+Isso atualiza `public/icons/` (192, 512, apple-touch) e `app/icon.png`.
 
 ---
 
@@ -26,7 +39,7 @@ NEXT_PUBLIC_SUPABASE_URL=https://SEU-PROJETO.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=sua-chave-aqui
 ```
 
-4. **SQL Editor** → rodar `supabase/schema.sql` e depois `supabase/migration-v2.sql`
+4. **SQL Editor** → rodar `supabase/schema.sql` e as migrações v2, v3 e **v4**
 5. **Authentication → Providers → Email** → desligar "Confirm email"
 6. Criar sua conta no app (ou no painel Authentication → Users)
 
@@ -98,15 +111,25 @@ git push -u origin main
 3. **Adicionar à Tela de Início**
 4. O app abre em tela cheia, como nativo
 
-### 3.4 — Notificações push (opcional, após deploy)
+### 3.4 — Notificações push (água + frases)
 
-1. No terminal local, gere chaves VAPID:
+**Tipos de lembrete:**
+
+| Tipo | Como funciona |
+| --- | --- |
+| **Água** | Você escolhe os horários (8h–21h) em Configurações. Só dispara se a meta do dia ainda não foi batida. |
+| **Frases** | Intervalo configurável (30 min a 3 h), só entre **8h e 21h** — sem notificação de madrugada. |
+
+**Passo a passo:**
+
+1. Rode `supabase/migration-v4.sql` no Supabase (se ainda não rodou)
+2. No terminal local, gere chaves VAPID:
 
 ```bash
 npx web-push generate-vapid-keys
 ```
 
-2. No painel da **Vercel** → seu projeto → **Settings → Environment Variables**, adicione:
+3. No painel da **Vercel** → seu projeto → **Settings → Environment Variables**, adicione:
 
 | Nome | Valor |
 | --- | --- |
@@ -115,9 +138,19 @@ npx web-push generate-vapid-keys
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API → service_role (secreta!) |
 | `CRON_SECRET` | invente uma senha longa (ex: 30 caracteres aleatórios) |
 
-3. **Redeploy**: Vercel → Deployments → ⋯ → Redeploy
-4. No app instalado no iPhone: **Configurações → Ativar notificações**
-5. Os lembretes de água (5× ao dia) e metas (21h) passam a funcionar via cron horário da Vercel
+4. **Redeploy**: Vercel → Deployments → ⋯ → Redeploy
+5. No iPhone: instale o PWA na tela de início (Safari → Compartilhar → Adicionar)
+6. Abra pelo ícone FORJA → **Configurações → Ativar notificações** → **Salvar** (horários de água + intervalo de frases)
+
+**Testar manualmente o cron** (substitua `SEU_CRON_SECRET`):
+
+```
+https://forja-app-weld.vercel.app/api/push/send?secret=SEU_CRON_SECRET
+```
+
+Resposta esperada: `{"ok":true,"hora":14,"enviados":1}` (números variam).
+
+> O cron da Vercel roda **a cada hora** (`0 * * * *`). Frases só saem quando a hora atual cai no intervalo (ex.: a cada 1 h = 8h, 9h, 10h… até 21h).
 
 ---
 
@@ -158,25 +191,30 @@ Permite que a IA do Cursor veja e gerencie seu banco.
 
 | Aba | O que faz |
 | --- | --- |
-| **Hoje** | Anel de progresso, streak, próxima ação, peso, diário |
-| **Dieta** | Cardápio editável, swipe para marcar, kcal + proteína, água em “águas” |
+| **Hoje** | Anel de progresso, streak, próxima ação, frase ao abrir |
+| **Dieta** | Cardápio editável (modal), tap/swipe para marcar, kcal + proteína, água |
 | **Treino** | ABC + Boxe, agenda semanal, templates, séries guiadas, timer 90s |
 | **Mente** | Insights contextuais, Deep Work 50min |
-| **Progresso** | Peso + média 7d, heatmap, volume semanal, CSV *(layout atual — ver roadmap abaixo)* |
+| **Progresso** | Peso, diário, heatmap, volume semanal, CSV |
+| **Configurações** | Metas, horários de água, intervalo de frases, push, sair |
+
+**Login:** criar conta, entrar e **esqueci minha senha** (link por e-mail).
+
+**Onboarding:** peso atual, meta de peso e meta de água (layout bento).
 
 ---
 
 ## Roadmap — próximas partes
 
-| Parte | Foco |
-| --- | --- |
-| **3 — Layout** | ✅ Design moderno (cards, gradiente, animações, nav) |
-| **4 — Dieta** | ✅ Águas, meta em litros, proteína, swipe refinado |
-| **5 — Auth** | Esqueci senha |
-| **6 — Onboarding** | Configuração inicial multiusuário |
-| **7 — Progresso** | Tela gamificada e intuitiva (ver abaixo) |
-| **8 — Frases** | Insights contextuais por horário/comportamento |
-| **9 — Push + offline** | Notificações e uso sem rede |
+| Parte | Foco | Status |
+| --- | --- | --- |
+| **3 — Layout** | Design bento, animações, nav | ✅ |
+| **4 — Dieta** | Águas, meta em litros, proteína, swipe | ✅ |
+| **5 — Auth** | Esqueci senha | ✅ |
+| **6 — Multiusuário** | Contas separadas / equipe | ⏸️ depois |
+| **7 — Progresso** | Jornada gamificada (“corrida ao ouro”) | ✅ parcial |
+| **8 — Frases** | Insights por horário/comportamento | ✅ no app + push |
+| **9 — Push** | Água (horários) + frases (intervalo 8–21h) | ✅ implementado — testar no iPhone |
 
 ### Parte 7 — Progresso (“corrida ao ouro”)
 
@@ -194,7 +232,7 @@ Implementação prevista na **parte 7** (conteúdo + gamificação) com poliment
 ```bash
 npm run dev      # preview local
 npm run build    # verificar se compila (rode antes do deploy)
-node scripts/generate-icons.mjs   # regenerar ícones azuis
+node scripts/generate-icons.mjs   # regenerar ícones a partir de assets/forja-icon-source.png
 ```
 
 ---
@@ -227,6 +265,7 @@ A Vercel detecta o push na branch `main` e faz **deploy automático** em ~1–2 
 **Migrações Supabase** (rode no SQL Editor quando indicado):
 - `supabase/migration-v2.sql` — treinos editáveis
 - `supabase/migration-v3.sql` — meta de proteína (g/dia)
+- `supabase/migration-v4.sql` — lembretes de frases (push)
 
 ### Pelo Cursor (interface visual)
 

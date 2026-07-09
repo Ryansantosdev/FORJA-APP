@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import webpush from "web-push";
+import { deveEnviarFrase, insightForPush } from "@/lib/insights-push";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Endpoint de disparo de lembretes. Chamado por um agendador externo
- * (Vercel Cron ou cron-job.org) a cada hora, protegido por CRON_SECRET.
- *
- * - Hora do lembrete de metas: avisa se o dia ainda não está 100%.
- * - Janela de água: avisa se a meta de água ainda não foi batida.
+ * Disparo de lembretes push (Vercel Cron, a cada hora).
+ * Tipos: água (horários escolhidos), frases (intervalo 8h–21h).
  */
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -34,10 +32,8 @@ export async function GET(req: NextRequest) {
 
   webpush.setVapidDetails("mailto:forja@app.local", vapidPublic, vapidPrivate);
 
-  // Service role: usado APENAS no servidor, nunca exposto ao client.
   const admin = createClient(supabaseUrl, serviceKey);
 
-  // hora atual no fuso de Brasília
   const now = new Date();
   const hora = parseInt(
     new Intl.DateTimeFormat("pt-BR", {
@@ -48,7 +44,7 @@ export async function GET(req: NextRequest) {
   );
   const hoje = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Sao_Paulo",
-  }).format(now); // YYYY-MM-DD
+  }).format(now);
 
   const { data: allSettings } = await admin
     .from("user_settings")
@@ -60,38 +56,6 @@ export async function GET(req: NextRequest) {
   for (const s of allSettings ?? []) {
     const mensagens: { title: string; body: string; url: string }[] = [];
 
-    // ---- lembrete de metas ----
-    if (hora === s.hora_lembrete_metas) {
-      const [meals, mealLogs, workout] = await Promise.all([
-        admin.from("meals").select("id").eq("user_id", s.user_id),
-        admin
-          .from("meal_logs")
-          .select("meal_id")
-          .eq("user_id", s.user_id)
-          .eq("date", hoje),
-        admin
-          .from("workout_logs")
-          .select("concluido")
-          .eq("user_id", s.user_id)
-          .eq("date", hoje)
-          .maybeSingle(),
-      ]);
-      const total = meals.data?.length ?? 0;
-      const done = mealLogs.data?.length ?? 0;
-      const treinoOk = workout.data?.concluido === true;
-      if (total === 0 || done < total || !treinoOk) {
-        const faltas: string[] = [];
-        if (done < total) faltas.push(`${total - done} refeições`);
-        if (!treinoOk) faltas.push("o treino");
-        mensagens.push({
-          title: "O dia ainda não acabou.",
-          body: `Faltam ${faltas.join(" e ")}. Feche as metas ou o streak zera.`,
-          url: "/",
-        });
-      }
-    }
-
-    // ---- lembrete de água (5 horários fixos) ----
     const horasAgua = (s.agua_lembrete_horas as number[]) ?? [8, 11, 14, 17, 20];
     if (horasAgua.includes(hora)) {
       const { data: daily } = await admin
@@ -104,32 +68,28 @@ export async function GET(req: NextRequest) {
       if (bebido < s.meta_agua_ml) {
         const faltaL = ((s.meta_agua_ml - bebido) / 1000).toFixed(1);
         mensagens.push({
-          title: "Hidratação",
-          body: `Faltam ${faltaL}L. Beba um copo e marque no app.`,
+          title: "Hora de beber água",
+          body: `Faltam ${faltaL}L para a meta. Abra a Dieta e marque.`,
           url: "/dieta",
         });
       }
     }
 
-    // ---- marcos de streak ----
-    const { data: stats } = await admin
-      .from("user_stats")
-      .select("current_streak, max_streak")
-      .eq("user_id", s.user_id)
-      .maybeSingle();
-    const marcos = [7, 30, 66, 100];
-    const streak = stats?.current_streak ?? 0;
-    if (marcos.includes(streak) && hora === 8) {
-      const msgs: Record<number, string> = {
-        7: "1 semana de ferro. A maioria desiste aqui. Você não.",
-        30: "30 dias. Hábito forjado. Não negocie com a preguiça.",
-        66: "66 dias. Isso é ciência: o hábito está no seu DNA agora.",
-        100: "100 dias. Centurião. Poucos chegam aqui.",
-      };
+    const fraseAtivo = s.frase_lembrete_ativo !== false;
+    const fraseInicio = s.frase_lembrete_inicio ?? 8;
+    const fraseFim = s.frase_lembrete_fim ?? 21;
+    const fraseIntervalo = s.frase_lembrete_intervalo_min ?? 60;
+
+    if (
+      fraseAtivo &&
+      deveEnviarFrase(hora, fraseInicio, fraseFim, fraseIntervalo)
+    ) {
+      const slot = Math.floor(((hora - fraseInicio) * 60) / fraseIntervalo);
+      const frase = insightForPush(`${s.user_id}-${hoje}-${slot}`);
       mensagens.push({
-        title: `Streak ${streak} dias`,
-        body: msgs[streak],
-        url: "/",
+        title: frase.title,
+        body: frase.body,
+        url: "/motivacao",
       });
     }
 
@@ -154,7 +114,6 @@ export async function GET(req: NextRequest) {
         } catch (err: unknown) {
           const status = (err as { statusCode?: number }).statusCode;
           if (status === 404 || status === 410) {
-            // subscription morta — limpa do banco
             await admin.from("push_subscriptions").delete().eq("id", sub.id);
           }
         }

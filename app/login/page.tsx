@@ -2,15 +2,16 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Flame, AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import BentoCard, { BentoLabel } from "@/components/BentoCard";
+import BentoCard from "@/components/BentoCard";
+import ForjaLogo from "@/components/ForjaLogo";
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [mode, setMode] = useState<"login" | "signup" | "reset">("login");
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -23,6 +24,24 @@ export default function LoginPage() {
     setInfo(null);
     setLoading(true);
     const supabase = createClient();
+
+    if (mode === "reset") {
+      if (!email.trim()) {
+        setError("Informe seu e-mail.");
+        setLoading(false);
+        return;
+      }
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/login`,
+      });
+      if (error) setError(traduzErro(error.message));
+      else
+        setInfo(
+          "Enviamos um link para redefinir sua senha. Verifique o e-mail (e o spam)."
+        );
+      setLoading(false);
+      return;
+    }
 
     if (mode === "signup") {
       const { error } = await supabase.auth.signUp({ email, password });
@@ -52,9 +71,9 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-[80dvh] flex-col justify-center">
       <div className="mb-10 animate-fade-up text-center">
-        <BentoCard variant="violet" className="mx-auto mb-6 !min-h-0 inline-flex h-16 w-16 items-center justify-center !p-0">
-          <Flame size={32} className="text-white" />
-        </BentoCard>
+        <div className="mx-auto mb-4 flex justify-center">
+          <ForjaLogo size={80} />
+        </div>
         <h1 className="text-3xl font-extrabold tracking-tight">FORJA</h1>
         <p className="mt-2 text-sm text-white/45">
           Disciplina não se encontra. Se constrói.
@@ -86,7 +105,9 @@ export default function LoginPage() {
         </BentoCard>
       ) : (
         <form onSubmit={handleSubmit} className="animate-fade-up space-y-3">
-        <p className="section-label">Acesso</p>
+          <p className="section-label">
+            {mode === "reset" ? "Recuperar senha" : "Acesso"}
+          </p>
           <input
             type="email"
             required
@@ -95,15 +116,17 @@ export default function LoginPage() {
             onChange={(e) => setEmail(e.target.value)}
             className="input-field w-full px-4 py-3.5 text-base"
           />
-          <input
-            type="password"
-            required
-            minLength={6}
-            placeholder="Senha (mín. 6 caracteres)"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="input-field w-full px-4 py-3.5 text-base"
-          />
+          {mode !== "reset" && (
+            <input
+              type="password"
+              required
+              minLength={6}
+              placeholder="Senha (mín. 6 caracteres)"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="input-field w-full px-4 py-3.5 text-base"
+            />
+          )}
           {error && <p className="text-sm text-danger">{error}</p>}
           {info && <p className="text-sm text-mint">{info}</p>}
           <button
@@ -115,20 +138,50 @@ export default function LoginPage() {
               ? "Aguarde..."
               : mode === "login"
                 ? "Entrar"
-                : "Criar conta"}
+                : mode === "signup"
+                  ? "Criar conta"
+                  : "Enviar link"}
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMode(mode === "login" ? "signup" : "login");
-              setError(null);
-            }}
-            className="w-full py-2 text-sm text-white/45"
-          >
-            {mode === "login"
-              ? "Primeira vez? Criar conta"
-              : "Já tenho conta — entrar"}
-          </button>
+          {mode === "login" && (
+            <button
+              type="button"
+              onClick={() => {
+                setMode("reset");
+                setError(null);
+                setInfo(null);
+              }}
+              className="w-full py-2 text-sm text-white/45"
+            >
+              Esqueci minha senha
+            </button>
+          )}
+          {mode === "reset" && (
+            <button
+              type="button"
+              onClick={() => {
+                setMode("login");
+                setError(null);
+                setInfo(null);
+              }}
+              className="w-full py-2 text-sm text-white/45"
+            >
+              Voltar ao login
+            </button>
+          )}
+          {mode !== "reset" && (
+            <button
+              type="button"
+              onClick={() => {
+                setMode(mode === "login" ? "signup" : "login");
+                setError(null);
+              }}
+              className="w-full py-2 text-sm text-white/45"
+            >
+              {mode === "login"
+                ? "Primeira vez? Criar conta"
+                : "Já tenho conta — entrar"}
+            </button>
+          )}
         </form>
       )}
     </div>
