@@ -89,6 +89,7 @@ create table if not exists public.user_settings (
   user_id uuid primary key references auth.users (id) on delete cascade,
   meta_agua_ml int not null default 3000,
   copo_ml int not null default 250,
+  meta_proteina_g int not null default 150,
   meta_peso numeric(5, 2),
   agua_lembrete_inicio int not null default 8,
   agua_lembrete_fim int not null default 22,

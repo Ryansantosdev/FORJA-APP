@@ -7,9 +7,7 @@ import {
   Utensils,
   Apple,
   Moon,
-  Droplets,
   Plus,
-  Minus,
   Pencil,
   Trash2,
   X,
@@ -18,9 +16,19 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { todayStr, yesterdayStr, isRetroactiveWindow } from "@/lib/dates";
-import { getCached, setCached, getCachedEntry, isCacheFresh, STATIC_DATA_TTL } from "@/lib/cache";
+import {
+  getCached,
+  setCached,
+  getCachedEntry,
+  isCacheFresh,
+  STATIC_DATA_TTL,
+} from "@/lib/cache";
 import SwipeCard from "@/components/SwipeCard";
 import LoadState from "@/components/LoadState";
+import BentoCard, { BentoLabel, BentoValue } from "@/components/BentoCard";
+import RangeBar from "@/components/RangeBar";
+import WaterTracker from "@/components/WaterTracker";
+import { showToast } from "@/lib/toast";
 import type { Meal, MealItem } from "@/lib/types";
 
 type DietaCache = {
@@ -29,6 +37,7 @@ type DietaCache = {
   aguaMl: number;
   metaAgua: number;
   copoMl: number;
+  metaProteina: number;
 };
 
 function readDietaCache(): DietaCache | null {
@@ -42,6 +51,10 @@ const ICONES: Record<string, React.ElementType> = {
   moon: Moon,
 };
 
+const DEFAULT_META_PROT = 150;
+
+const MEAL_VARIANTS = ["amber", "blue", "violet", "slate"] as const;
+
 export default function DietaPage() {
   const cached = readDietaCache();
   const [meals, setMeals] = useState<Meal[]>(() => cached?.meals ?? []);
@@ -51,6 +64,9 @@ export default function DietaPage() {
   const [aguaMl, setAguaMl] = useState(() => cached?.aguaMl ?? 0);
   const [metaAgua, setMetaAgua] = useState(() => cached?.metaAgua ?? 3000);
   const [copoMl, setCopoMl] = useState(() => cached?.copoMl ?? 250);
+  const [metaProteina, setMetaProteina] = useState(
+    () => cached?.metaProteina ?? DEFAULT_META_PROT
+  );
   const [editing, setEditing] = useState<Meal | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [loading, setLoading] = useState(!cached);
@@ -59,115 +75,167 @@ export default function DietaPage() {
   const today = todayStr();
   const [activeDate, setActiveDate] = useState(() => todayStr());
 
-  const load = useCallback(async (force = false) => {
-    setLoadError(null);
-    const entry = getCachedEntry<DietaCache>("dieta_data");
-    const hadCache = Boolean(entry?.data.meals.length);
-    const mealsFresh = !force && isCacheFresh(entry, STATIC_DATA_TTL) && hadCache;
+  const persistCache = useCallback(
+    (patch: Partial<DietaCache> & { doneIds?: string[] }) => {
+      const base = readDietaCache();
+      setCached("dieta_data", {
+        meals: patch.meals ?? meals,
+        doneIds: patch.doneIds ?? [...done],
+        aguaMl: patch.aguaMl ?? aguaMl,
+        metaAgua: patch.metaAgua ?? metaAgua,
+        copoMl: patch.copoMl ?? copoMl,
+        metaProteina: patch.metaProteina ?? metaProteina,
+      });
+      if (base && patch.meals === undefined) {
+        /* keep meals from state via args above */
+      }
+    },
+    [meals, done, aguaMl, metaAgua, copoMl, metaProteina]
+  );
 
-    if (!hadCache) setLoading(true);
+  const load = useCallback(
+    async (force = false) => {
+      setLoadError(null);
+      const entry = getCachedEntry<DietaCache>("dieta_data");
+      const hadCache = Boolean(entry?.data.meals.length);
+      const mealsFresh =
+        !force && isCacheFresh(entry, STATIC_DATA_TTL) && hadCache;
 
-    try {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!hadCache) setLoading(true);
 
-      if (mealsFresh && entry) {
-        const [logsRes, dailyRes] = await Promise.all([
+      try {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const settingsSelect = "meta_agua_ml, copo_ml";
+
+        if (mealsFresh && entry) {
+          const [logsRes, dailyRes, settingsRes, protRes] = await Promise.all([
+            supabase
+              .from("meal_logs")
+              .select("meal_id")
+              .eq("user_id", user.id)
+              .eq("date", activeDate),
+            activeDate === today
+              ? supabase
+                  .from("daily_logs")
+                  .select("agua_ml")
+                  .eq("user_id", user.id)
+                  .eq("date", today)
+                  .maybeSingle()
+              : Promise.resolve({ data: null, error: null }),
+            supabase
+              .from("user_settings")
+              .select(settingsSelect)
+              .eq("user_id", user.id)
+              .maybeSingle(),
+            supabase
+              .from("user_settings")
+              .select("meta_proteina_g")
+              .eq("user_id", user.id)
+              .maybeSingle(),
+          ]);
+
+          const doneIds = logsRes.data?.map((l) => l.meal_id) ?? [];
+          const agua =
+            activeDate === today
+              ? (dailyRes.data?.agua_ml ?? entry.data.aguaMl)
+              : aguaMl;
+          const metaProt = protRes.error
+            ? entry.data.metaProteina ?? DEFAULT_META_PROT
+            : (protRes.data?.meta_proteina_g ?? DEFAULT_META_PROT);
+
+          setMeals(entry.data.meals);
+          setDone(new Set(doneIds));
+          if (activeDate === today) setAguaMl(agua);
+          setMetaAgua(entry.data.metaAgua);
+          setCopoMl(entry.data.copoMl);
+          setMetaProteina(metaProt);
+          setCached("dieta_data", {
+            meals: entry.data.meals,
+            doneIds,
+            aguaMl: agua,
+            metaAgua: entry.data.metaAgua,
+            copoMl: entry.data.copoMl,
+            metaProteina: metaProt,
+          });
+          return;
+        }
+
+        const [mealsRes, logsRes, dailyRes, settingsRes, protRes] = await Promise.all([
+          supabase
+            .from("meals")
+            .select("id, ordem, nome, icone, itens")
+            .eq("user_id", user.id)
+            .order("ordem"),
           supabase
             .from("meal_logs")
             .select("meal_id")
             .eq("user_id", user.id)
             .eq("date", activeDate),
-          activeDate === today
-            ? supabase
-                .from("daily_logs")
-                .select("agua_ml")
-                .eq("user_id", user.id)
-                .eq("date", today)
-                .maybeSingle()
-            : Promise.resolve({ data: null, error: null }),
+          supabase
+            .from("daily_logs")
+            .select("agua_ml")
+            .eq("user_id", user.id)
+            .eq("date", today)
+            .maybeSingle(),
+          supabase
+            .from("user_settings")
+            .select(settingsSelect)
+            .eq("user_id", user.id)
+            .maybeSingle(),
+          supabase
+            .from("user_settings")
+            .select("meta_proteina_g")
+            .eq("user_id", user.id)
+            .maybeSingle(),
         ]);
 
+        if (mealsRes.error) throw mealsRes.error;
+
+        const m = (mealsRes.data as Meal[]) ?? [];
         const doneIds = logsRes.data?.map((l) => l.meal_id) ?? [];
         const agua =
-          activeDate === today ? (dailyRes.data?.agua_ml ?? entry.data.aguaMl) : aguaMl;
+          activeDate === today ? (dailyRes.data?.agua_ml ?? 0) : aguaMl;
+        const meta = settingsRes.data?.meta_agua_ml ?? 3000;
+        const copo = settingsRes.data?.copo_ml ?? 250;
+        const metaProt = protRes.error
+          ? DEFAULT_META_PROT
+          : (protRes.data?.meta_proteina_g ?? DEFAULT_META_PROT);
 
-        setMeals(entry.data.meals);
+        setMeals(m);
         setDone(new Set(doneIds));
         if (activeDate === today) setAguaMl(agua);
-        setMetaAgua(entry.data.metaAgua);
-        setCopoMl(entry.data.copoMl);
+        setMetaAgua(meta);
+        setCopoMl(copo);
+        setMetaProteina(metaProt);
         setCached("dieta_data", {
-          meals: entry.data.meals,
+          meals: m,
           doneIds,
           aguaMl: agua,
-          metaAgua: entry.data.metaAgua,
-          copoMl: entry.data.copoMl,
+          metaAgua: meta,
+          copoMl: copo,
+          metaProteina: metaProt,
         });
-        return;
+      } catch (e) {
+        const msg =
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message: string }).message)
+            : "Erro ao carregar dieta.";
+        setLoadError(
+          msg.includes("meals")
+            ? "Cardápio não encontrado. Rode supabase/schema.sql no Supabase."
+            : "Não foi possível carregar. Verifique a conexão."
+        );
+      } finally {
+        setLoading(false);
       }
-
-      const [mealsRes, logsRes, dailyRes, settingsRes] = await Promise.all([
-        supabase
-          .from("meals")
-          .select("id, ordem, nome, icone, itens")
-          .eq("user_id", user.id)
-          .order("ordem"),
-        supabase
-          .from("meal_logs")
-          .select("meal_id")
-          .eq("user_id", user.id)
-          .eq("date", activeDate),
-        supabase
-          .from("daily_logs")
-          .select("agua_ml")
-          .eq("user_id", user.id)
-          .eq("date", today)
-          .maybeSingle(),
-        supabase
-          .from("user_settings")
-          .select("meta_agua_ml, copo_ml")
-          .eq("user_id", user.id)
-          .maybeSingle(),
-      ]);
-
-      if (mealsRes.error) throw mealsRes.error;
-
-      const m = (mealsRes.data as Meal[]) ?? [];
-      const doneIds = logsRes.data?.map((l) => l.meal_id) ?? [];
-      const agua = activeDate === today ? (dailyRes.data?.agua_ml ?? 0) : aguaMl;
-      const meta = settingsRes.data?.meta_agua_ml ?? 3000;
-      const copo = settingsRes.data?.copo_ml ?? 250;
-
-      setMeals(m);
-      setDone(new Set(doneIds));
-      if (activeDate === today) setAguaMl(agua);
-      setMetaAgua(meta);
-      setCopoMl(copo);
-      setCached("dieta_data", {
-        meals: m,
-        doneIds,
-        aguaMl: agua,
-        metaAgua: meta,
-        copoMl: copo,
-      });
-    } catch (e) {
-      const msg =
-        e && typeof e === "object" && "message" in e
-          ? String((e as { message: string }).message)
-          : "Erro ao carregar dieta.";
-      setLoadError(
-        msg.includes("meals")
-          ? "Cardápio não encontrado. Rode supabase/schema.sql no Supabase."
-          : "Não foi possível carregar. Verifique a conexão."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [activeDate, today]);
+    },
+    [activeDate, today, aguaMl]
+  );
 
   useEffect(() => {
     load();
@@ -190,32 +258,33 @@ export default function DietaPage() {
         .eq("user_id", user.id)
         .eq("date", activeDate)
         .eq("meal_id", mealId);
+      showToast("Refeição desmarcada");
     } else {
       newDone.add(mealId);
       setDone(newDone);
-      await supabase
-        .from("meal_logs")
-        .upsert(
-          { user_id: user.id, date: activeDate, meal_id: mealId },
-          { onConflict: "user_id,date,meal_id" }
-        );
+      await supabase.from("meal_logs").upsert(
+        { user_id: user.id, date: activeDate, meal_id: mealId },
+        { onConflict: "user_id,date,meal_id" }
+      );
+      const meal = meals.find((m) => m.id === mealId);
+      showToast(meal ? `${meal.nome} marcada ✓` : "Refeição marcada ✓");
     }
+    persistCache({ doneIds: [...newDone] });
   }
 
-  async function mudarAgua(delta: number) {
-    const novo = Math.max(0, aguaMl + delta);
-    setAguaMl(novo);
+  async function mudarAgua(novoMl: number) {
+    setAguaMl(novoMl);
+    persistCache({ aguaMl: novoMl });
     const supabase = createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase
-      .from("daily_logs")
-      .upsert(
-        { user_id: user.id, date: today, agua_ml: novo },
-        { onConflict: "user_id,date" }
-      );
+    await supabase.from("daily_logs").upsert(
+      { user_id: user.id, date: today, agua_ml: novoMl },
+      { onConflict: "user_id,date" }
+    );
+    showToast("Água atualizada ✓");
   }
 
   async function salvarMeal(meal: Meal) {
@@ -236,14 +305,20 @@ export default function DietaPage() {
         })
         .select("id, ordem, nome, icone, itens")
         .single();
-      if (data) setMeals([...meals, data as Meal]);
+      if (data) {
+        const next = [...meals, data as Meal];
+        setMeals(next);
+        persistCache({ meals: next });
+      }
     } else {
       await supabase
         .from("meals")
         .update({ nome: meal.nome, itens: meal.itens })
         .eq("id", meal.id)
         .eq("user_id", user.id);
-      setMeals(meals.map((m) => (m.id === meal.id ? meal : m)));
+      const next = meals.map((m) => (m.id === meal.id ? meal : m));
+      setMeals(next);
+      persistCache({ meals: next });
     }
     setEditing(null);
   }
@@ -260,7 +335,9 @@ export default function DietaPage() {
       .delete()
       .eq("id", mealId)
       .eq("user_id", user.id);
-    setMeals(meals.filter((m) => m.id !== mealId));
+    const next = meals.filter((m) => m.id !== mealId);
+    setMeals(next);
+    persistCache({ meals: next });
     setEditing(null);
   }
 
@@ -270,43 +347,53 @@ export default function DietaPage() {
   );
   const kcalDone = meals
     .filter((m) => done.has(m.id))
-    .reduce((acc, m) => acc + m.itens.reduce((a, i) => a + (i.kcal || 0), 0), 0);
+    .reduce(
+      (acc, m) => acc + m.itens.reduce((a, i) => a + (i.kcal || 0), 0),
+      0
+    );
   const protTotal = meals.reduce(
     (acc, m) => acc + m.itens.reduce((a, i) => a + (i.proteina_g || 0), 0),
     0
   );
   const protDone = meals
     .filter((m) => done.has(m.id))
-    .reduce((acc, m) => acc + m.itens.reduce((a, i) => a + (i.proteina_g || 0), 0), 0);
-  const pctAgua = Math.min(100, Math.round((aguaMl / metaAgua) * 100));
+    .reduce(
+      (acc, m) => acc + m.itens.reduce((a, i) => a + (i.proteina_g || 0), 0),
+      0
+    );
   const isYesterday = activeDate === yesterdayStr();
   const canRetro = isRetroactiveWindow();
+  const showWater = activeDate === today;
 
   return (
-    <div className="space-y-4">
-      <header className="flex items-end justify-between pt-2">
+    <div className="space-y-4 pb-2">
+      <header className="animate-fade-up flex items-end justify-between pt-1">
         <div>
-          <h1 className="text-xl font-bold">Dieta</h1>
-          <p className="text-xs text-muted">
-            {kcalDone}/{kcalTotal} kcal · {protDone}/{protTotal}g prot · {done.size}/{meals.length} refeições
+          <p className="section-label">Nutrição</p>
+          <h1 className="text-2xl font-extrabold tracking-tight">Dieta</h1>
+          <p className="mt-0.5 text-sm font-medium text-white/55">
+            {isYesterday
+              ? "Registrando ontem"
+              : `${done.size}/${meals.length} refeições · ${kcalDone}/${kcalTotal} kcal`}
           </p>
-          {isYesterday && (
-            <p className="text-xs text-amber">Registrando ontem</p>
-          )}
         </div>
         <div className="flex gap-2">
           {canRetro && (
             <button
-              onClick={() => setActiveDate(isYesterday ? today : yesterdayStr())}
-              className="rounded-xl border border-line bg-surface px-2 py-2 text-[10px] font-semibold text-muted"
+              onClick={() =>
+                setActiveDate(isYesterday ? today : yesterdayStr())
+              }
+              className={`btn-ghost px-3 py-2 text-[10px] font-bold ${
+                isYesterday ? "active" : ""
+              }`}
             >
               {isYesterday ? "Hoje" : "Ontem"}
             </button>
           )}
           <button
             onClick={() => setEditMode(!editMode)}
-            className={`rounded-xl border px-3 py-2 text-xs font-semibold ${
-              editMode ? "border-primary/40 bg-primary/10 text-primary" : "border-line bg-surface text-muted"
+            className={`btn-ghost px-3 py-2 text-xs font-bold ${
+              editMode ? "active" : ""
             }`}
           >
             {editMode ? "Pronto" : "Editar"}
@@ -314,54 +401,60 @@ export default function DietaPage() {
         </div>
       </header>
 
-      {/* ÁGUA */}
-      <section className="rounded-2xl border border-line bg-surface p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Droplets size={18} className="text-[#4db8ff]" />
-            <span className="text-sm font-semibold">
-              {(aguaMl / 1000).toFixed(2).replace(".", ",")}L
-              <span className="text-muted">
-                {" "}
-                / {(metaAgua / 1000).toFixed(1).replace(".", ",")}L
-              </span>
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => mudarAgua(-copoMl)}
-              className="rounded-lg border border-line bg-elev p-2 text-muted"
-              aria-label="Remover copo"
-            >
-              <Minus size={16} />
-            </button>
-            <span className="min-w-14 text-center text-xs text-muted">
-              copo {copoMl}ml
-            </span>
-            <button
-              onClick={() => mudarAgua(copoMl)}
-              className="rounded-lg bg-[#4db8ff] p-2 text-black"
-              aria-label="Adicionar copo"
-            >
-              <Plus size={16} />
-            </button>
-          </div>
-        </div>
-        <div className="mt-3 h-2 overflow-hidden rounded-full bg-elev">
-          <div
-            className="h-full rounded-full bg-[#4db8ff] transition-all"
-            style={{ width: `${pctAgua}%` }}
+      {showWater && (
+        <WaterTracker
+          aguaMl={aguaMl}
+          metaMl={metaAgua}
+          copoMl={copoMl}
+          onChange={mudarAgua}
+        />
+      )}
+
+      {/* Macros */}
+      <div className="bento-grid">
+        <BentoCard variant="amber" className="!min-h-0">
+          <BentoLabel>Calorias</BentoLabel>
+          <BentoValue compact sub="kcal hoje">
+            {kcalDone}/{kcalTotal}
+          </BentoValue>
+          <RangeBar
+            pct={kcalTotal ? Math.round((kcalDone / kcalTotal) * 100) : 0}
+            color="amber"
           />
-        </div>
-      </section>
+        </BentoCard>
+        <BentoCard variant="mint" className="!min-h-0">
+          <BentoLabel>Proteína</BentoLabel>
+          <BentoValue compact sub={`meta ${metaProteina}g`}>
+            {protDone}/{Math.max(protTotal, metaProteina)}g
+          </BentoValue>
+          <RangeBar
+            pct={
+              metaProteina
+                ? Math.min(100, Math.round((protDone / metaProteina) * 100))
+                : 0
+            }
+            color="mint"
+          />
+        </BentoCard>
+      </div>
+
+      {!editMode && meals.length > 0 && (
+        <p className="section-label px-1">Cardápio</p>
+      )}
+
+      {!editMode && meals.length > 0 && (
+        <p className="px-1 text-center text-[10px] text-white/35">
+          Toque no card para marcar · deslize → também funciona
+        </p>
+      )}
 
       <LoadState
         loading={loading}
         error={loadError}
-        onRetry={() => load()}
+        onRetry={() => load(true)}
         empty={!loading && !loadError && meals.length === 0}
         emptyTitle="Cardápio vazio"
-        emptyDesc="Seu cardápio ainda não foi criado. Rode o schema no Supabase ou adicione refeições."
+        emptyDesc="Adicione refeições ou rode o schema no Supabase."
         emptyAction={
           <button
             onClick={() =>
@@ -373,71 +466,115 @@ export default function DietaPage() {
                 itens: [],
               })
             }
-            className="rounded-xl bg-primary px-4 py-3 font-bold text-black"
+            className="btn-primary w-full px-4 py-3"
           >
             Adicionar refeição
           </button>
         }
       >
-        {meals.map((meal) => {
+        {meals.map((meal, idx) => {
           const Icon = ICONES[meal.icone] ?? Utensils;
           const isDone = done.has(meal.id);
           const kcal = meal.itens.reduce((a, i) => a + (i.kcal || 0), 0);
+          const prot = meal.itens.reduce((a, i) => a + (i.proteina_g || 0), 0);
           const isOpen = expanded === meal.id;
+          const variant = isDone ? "mint" : MEAL_VARIANTS[idx % MEAL_VARIANTS.length];
+
+          function handleCardTap() {
+            if (editMode) return;
+            if (isOpen) return;
+            if (!isDone) {
+              toggleMeal(meal.id);
+            } else {
+              setExpanded(meal.id);
+            }
+          }
+
           const card = (
-            <section
-              className={`rounded-2xl p-4 transition-colors ${
-                isDone ? "bg-primary/5" : "bg-surface"
-              }`}
+            <BentoCard
+              variant={variant}
+              className={`!min-h-0 !p-3 ${!editMode && !isDone ? "cursor-pointer active:scale-[0.99]" : ""}`}
+              onClick={!editMode ? handleCardTap : undefined}
             >
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => toggleMeal(meal.id)}
-                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors ${
+                  type="button"
+                  data-no-mark
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleMeal(meal.id);
+                  }}
+                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-all ${
                     isDone
-                      ? "border-primary bg-primary text-black animate-check-pop"
-                      : "border-line bg-elev text-muted"
+                      ? "bg-mint/25 text-mint animate-check-pop ring-2 ring-mint/30"
+                      : "bg-white/[0.06] text-white/50"
                   }`}
                   aria-label={`Marcar ${meal.nome}`}
                 >
-                  {isDone ? <Check size={22} strokeWidth={3} /> : <Icon size={20} />}
+                  {isDone ? (
+                    <Check size={20} strokeWidth={3} />
+                  ) : (
+                    <Icon size={18} />
+                  )}
                 </button>
-                <button
-                  className="flex-1 text-left"
-                  onClick={() => setExpanded(isOpen ? null : meal.id)}
-                >
-                  <p className={`font-semibold ${isDone ? "text-primary" : ""}`}>
+                <div className="min-w-0 flex-1 text-left">
+                  <p
+                    className={`truncate font-semibold ${isDone ? "text-mint" : ""}`}
+                  >
                     {meal.nome}
                   </p>
-                  <p className="text-xs text-muted">~{kcal} kcal</p>
-                </button>
+                  <p className="text-xs text-white/45">
+                    ~{kcal} kcal
+                    {prot > 0 ? ` · ${prot}g prot` : ""}
+                  </p>
+                </div>
                 {editMode && (
-                  <button onClick={() => setEditing(meal)} className="p-2 text-muted">
+                  <button
+                    type="button"
+                    data-no-mark
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditing(meal);
+                    }}
+                    className="btn-ghost p-2"
+                  >
                     <Pencil size={16} />
                   </button>
                 )}
                 <button
-                  onClick={() => setExpanded(isOpen ? null : meal.id)}
-                  className="p-1 text-muted"
+                  type="button"
+                  data-no-mark
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExpanded(isOpen ? null : meal.id);
+                  }}
+                  className="btn-ghost p-1"
                 >
                   <ChevronDown
                     size={18}
-                    className={`transition-transform ${isOpen ? "rotate-180" : ""}`}
+                    className={`transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
                   />
                 </button>
               </div>
               {isOpen && (
-                <ul className="mt-3 space-y-2 border-t border-line pt-3">
+                <ul className="mt-3 space-y-2 border-t border-white/[0.08] pt-3">
                   {meal.itens.map((item, i) => (
                     <li key={i} className="text-sm">
-                      <div className="flex justify-between">
-                        <span>
+                      <div className="flex justify-between gap-2">
+                        <span className="min-w-0">
                           {item.nome}{" "}
-                          <span className="text-muted">({item.quantidade})</span>
+                          <span className="text-white/40">
+                            ({item.quantidade})
+                          </span>
                         </span>
-                        <span className="text-muted">
+                        <span className="shrink-0 text-right text-white/45">
                           {item.kcal} kcal
-                          {item.proteina_g ? ` · ${item.proteina_g}g` : ""}
+                          {item.proteina_g ? (
+                            <span className="text-mint">
+                              {" "}
+                              · {item.proteina_g}g
+                            </span>
+                          ) : null}
                         </span>
                       </div>
                       {item.substituicoes.length > 0 && (
@@ -450,7 +587,7 @@ export default function DietaPage() {
                   ))}
                 </ul>
               )}
-            </section>
+            </BentoCard>
           );
           return editMode ? (
             <div key={meal.id}>{card}</div>
@@ -459,6 +596,7 @@ export default function DietaPage() {
               key={meal.id}
               onSwipe={() => !isDone && toggleMeal(meal.id)}
               disabled={isDone}
+              hint={idx === 0 && !isDone}
             >
               {card}
             </SwipeCard>
@@ -477,7 +615,7 @@ export default function DietaPage() {
               itens: [],
             })
           }
-          className="flex w-full items-center justify-center gap-1 rounded-xl border border-dashed border-line py-3 text-sm text-muted"
+          className="btn-ghost flex w-full items-center justify-center gap-1 border border-dashed border-white/15 py-3.5 text-sm"
         >
           <Plus size={16} /> Nova refeição
         </button>
@@ -497,8 +635,6 @@ export default function DietaPage() {
   );
 }
 
-// ---------- Editor de refeição ----------
-
 function MealEditor({
   meal,
   onSave,
@@ -517,36 +653,44 @@ function MealEditor({
     setItens(itens.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
   }
 
+  const totalProt = itens.reduce((a, i) => a + (i.proteina_g || 0), 0);
+  const totalKcal = itens.reduce((a, i) => a + (i.kcal || 0), 0);
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/70">
-      <div className="max-h-[88dvh] w-full max-w-md overflow-y-auto rounded-t-3xl border-t border-line bg-surface p-5 pb-[calc(env(safe-area-inset-bottom)+20px)]">
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/75 backdrop-blur-sm">
+      <div className="max-h-[88dvh] w-full max-w-md overflow-y-auto rounded-t-3xl border-t border-white/10 bg-[#0a0a0c] p-5 pb-[calc(env(safe-area-inset-bottom)+20px)]">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-bold">
-            {meal.id === "nova" ? "Nova refeição" : "Editar refeição"}
-          </h2>
-          <button onClick={onClose} className="p-2 text-muted" aria-label="Fechar">
+          <div>
+            <h2 className="text-lg font-bold">
+              {meal.id === "nova" ? "Nova refeição" : "Editar refeição"}
+            </h2>
+            <p className="text-xs text-muted">
+              {totalKcal} kcal · {totalProt}g prot
+            </p>
+          </div>
+          <button onClick={onClose} className="btn-ghost p-2" aria-label="Fechar">
             <X size={20} />
           </button>
         </div>
 
-        <label className="mb-1 block text-xs text-muted">Nome</label>
+        <label className="section-label mb-1 block">Nome</label>
         <input
           value={nome}
           onChange={(e) => setNome(e.target.value)}
           placeholder="ex: Café da Manhã"
-          className="mb-4 w-full rounded-xl border border-line bg-elev px-4 py-3 text-base outline-none focus:border-primary"
+          className="input-field mb-4 w-full px-4 py-3 text-base"
         />
 
-        <p className="mb-2 text-xs text-muted">Itens</p>
+        <p className="section-label mb-2">Itens</p>
         <div className="space-y-3">
           {itens.map((item, i) => (
-            <div key={i} className="rounded-xl border border-line bg-elev p-3">
+            <div key={i} className="rounded-xl bg-white/[0.04] p-3">
               <div className="mb-2 flex gap-2">
                 <input
                   value={item.nome}
                   onChange={(e) => setItem(i, { nome: e.target.value })}
                   placeholder="Alimento"
-                  className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
+                  className="input-field min-w-0 flex-1 px-3 py-2 text-sm"
                 />
                 <button
                   onClick={() => setItens(itens.filter((_, idx) => idx !== i))}
@@ -556,12 +700,12 @@ function MealEditor({
                   <Trash2 size={16} />
                 </button>
               </div>
-              <div className="flex gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <input
                   value={item.quantidade}
                   onChange={(e) => setItem(i, { quantidade: e.target.value })}
                   placeholder="150g"
-                  className="w-24 rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
+                  className="input-field px-3 py-2 text-sm"
                 />
                 <input
                   type="number"
@@ -571,22 +715,34 @@ function MealEditor({
                     setItem(i, { kcal: parseInt(e.target.value) || 0 })
                   }
                   placeholder="kcal"
-                  className="w-20 rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
+                  className="input-field px-3 py-2 text-sm"
                 />
                 <input
-                  value={item.substituicoes.join(", ")}
+                  type="number"
+                  inputMode="numeric"
+                  value={item.proteina_g || ""}
                   onChange={(e) =>
                     setItem(i, {
-                      substituicoes: e.target.value
-                        .split(",")
-                        .map((s) => s.trim())
-                        .filter(Boolean),
+                      proteina_g: parseInt(e.target.value) || undefined,
                     })
                   }
-                  placeholder="substituições (vírgula)"
-                  className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
+                  placeholder="prot g"
+                  className="input-field px-3 py-2 text-sm"
                 />
               </div>
+              <input
+                value={item.substituicoes.join(", ")}
+                onChange={(e) =>
+                  setItem(i, {
+                    substituicoes: e.target.value
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                  })
+                }
+                placeholder="substituições (vírgula)"
+                className="input-field mt-2 w-full px-3 py-2 text-sm"
+              />
             </div>
           ))}
         </div>
@@ -598,7 +754,7 @@ function MealEditor({
               { nome: "", quantidade: "", kcal: 0, substituicoes: [] },
             ])
           }
-          className="mt-3 flex w-full items-center justify-center gap-1 rounded-xl border border-dashed border-line py-3 text-sm text-muted"
+          className="btn-ghost mt-3 flex w-full items-center justify-center gap-1 border border-dashed border-white/15 py-3 text-sm"
         >
           <Plus size={16} /> Adicionar item
         </button>
@@ -607,7 +763,7 @@ function MealEditor({
           {onDelete && (
             <button
               onClick={onDelete}
-              className="rounded-xl border border-danger/40 px-4 py-3 text-sm font-semibold text-danger"
+              className="btn-ghost border border-danger/40 px-4 py-3 text-sm font-semibold text-danger"
             >
               Excluir
             </button>
@@ -616,7 +772,7 @@ function MealEditor({
             onClick={() =>
               nome.trim() && onSave({ ...meal, nome: nome.trim(), itens })
             }
-            className="flex-1 rounded-xl bg-primary py-3 font-bold text-black"
+            className="btn-primary flex-1 py-3"
           >
             Salvar
           </button>

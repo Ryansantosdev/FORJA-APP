@@ -4,33 +4,28 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  Flame,
   Settings,
   UtensilsCrossed,
   Dumbbell,
-  Droplets,
-  Scale,
   Quote,
-  Timer,
   Trophy,
-  NotebookPen,
-  Check,
   ChevronRight,
-  AlertTriangle,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   todayStr,
   daysAgoStr,
-  yesterdayStr,
   isRetroactiveWindow,
-  dayOfWeek,
 } from "@/lib/dates";
 import { syncStreak, ACHIEVEMENTS } from "@/lib/streak";
-import { insightOfTheDay } from "@/lib/insights";
+import { insightOnAppOpen, type Insight } from "@/lib/insights";
 import { getScheduledWorkoutId, findWorkoutById } from "@/lib/schedule";
 import { getCached, setCached, getCachedEntry, isCacheFresh, DAILY_TTL } from "@/lib/cache";
 import { getTreinoBundle, isTreinoCacheFresh } from "@/lib/treino-cache";
+import { aguasTomadas, totalAguas } from "@/lib/agua";
+import { formatLitersFromMl } from "@/lib/format";
+import BentoCard, { BentoLabel, BentoValue } from "@/components/BentoCard";
+import RangeBar from "@/components/RangeBar";
 import ProgressRing from "@/components/ProgressRing";
 import { SkeletonCard } from "@/components/Skeleton";
 import type { Workout, Meal } from "@/lib/types";
@@ -44,8 +39,8 @@ type Resumo = {
   treinoNome: string | null;
   aguaMl: number;
   metaAgua: number;
+  copoMl: number;
   focoMinSemana: number;
-  nota: string;
   pctDia: number;
 };
 
@@ -53,24 +48,18 @@ export default function Dashboard() {
   const router = useRouter();
   const [streak, setStreak] = useState<{ current: number; max: number }>();
   const [resumo, setResumo] = useState<Resumo>();
-  const [peso, setPeso] = useState("");
-  const [pesoSalvo, setPesoSalvo] = useState(false);
-  const [nota, setNota] = useState("");
-  const [notaSalva, setNotaSalva] = useState(false);
   const [nextMeal, setNextMeal] = useState<Meal | null>(null);
   const [scheduled, setScheduled] = useState<Workout | null>(null);
-  const [diarioSemana, setDiarioSemana] = useState<
-    { date: string; nota: string }[]
-  >([]);
-  const [loading, setLoading] = useState(() => {
-    const entry = getCachedEntry<Resumo>("dash_resumo");
-    return !isCacheFresh(entry, DAILY_TTL);
-  });
+  const [loading, setLoading] = useState(true);
   const today = todayStr();
-  const frase = insightOfTheDay(today);
-  const hour = new Date().getHours();
+  const [frase, setFrase] = useState<Insight | null>(null);
+  const [hour, setHour] = useState(0);
   const atRisk = hour >= 18 && (resumo?.pctDia ?? 0) < 100;
-  const isSunday = dayOfWeek() === 0;
+
+  useEffect(() => {
+    setHour(new Date().getHours());
+    setFrase(insightOnAppOpen());
+  }, []);
 
   const load = useCallback(async () => {
     const dashEntry = getCachedEntry<Resumo>("dash_resumo");
@@ -96,17 +85,15 @@ export default function Dashboard() {
           .select("id, ordem, letra, nome, exercicios")
           .eq("user_id", user.id);
 
-    const [meals, mealLogs, workout, daily, settings, focus, weight, workouts, weekNotes] =
+    const [meals, mealLogs, workout, daily, settings, focus, workouts] =
       await Promise.all([
         supabase.from("meals").select("id, ordem, nome, icone, itens").eq("user_id", user.id).order("ordem"),
         supabase.from("meal_logs").select("meal_id").eq("user_id", user.id).eq("date", today),
         supabase.from("workout_logs").select("concluido, workout_id, tipo_treino").eq("user_id", user.id).eq("date", today).maybeSingle(),
-        supabase.from("daily_logs").select("agua_ml, nota").eq("user_id", user.id).eq("date", today).maybeSingle(),
-        supabase.from("user_settings").select("meta_agua_ml, meta_peso, agenda_treino, onboarding_done").eq("user_id", user.id).maybeSingle(),
+        supabase.from("daily_logs").select("agua_ml").eq("user_id", user.id).eq("date", today).maybeSingle(),
+        supabase.from("user_settings").select("meta_agua_ml, meta_peso, copo_ml, agenda_treino, onboarding_done").eq("user_id", user.id).maybeSingle(),
         supabase.from("focus_logs").select("minutos").eq("user_id", user.id).gte("date", daysAgoStr(6)),
-        supabase.from("weight_logs").select("peso").eq("user_id", user.id).eq("date", today).maybeSingle(),
         workoutsQuery,
-        supabase.from("daily_logs").select("date, nota").eq("user_id", user.id).gte("date", daysAgoStr(6)).not("nota", "is", null),
       ]);
 
     if (settings.data && !settings.data.onboarding_done) {
@@ -124,6 +111,7 @@ export default function Dashboard() {
     }
 
     const metaAgua = settings.data?.meta_agua_ml ?? 3000;
+    const copoMl = settings.data?.copo_ml ?? 250;
     const aguaMl = daily.data?.agua_ml ?? 0;
     const treinoDone = workout.data?.concluido ?? false;
     const agenda =
@@ -151,8 +139,8 @@ export default function Dashboard() {
       treinoNome: sched ? `${sched.letra} — ${sched.nome}` : null,
       aguaMl,
       metaAgua,
+      copoMl,
       focoMinSemana: focus.data?.reduce((a, f) => a + f.minutos, 0) ?? 0,
-      nota: daily.data?.nota ?? "",
       pctDia,
     };
     setResumo(r);
@@ -160,16 +148,6 @@ export default function Dashboard() {
 
     const pending = mealList.find((m) => !doneIds.has(m.id));
     setNextMeal(pending ?? null);
-    setNota(daily.data?.nota ?? "");
-    if (weight.data?.peso) {
-      setPeso(String(weight.data.peso));
-      setPesoSalvo(true);
-    }
-    setDiarioSemana(
-      (weekNotes.data ?? [])
-        .filter((d) => d.nota?.trim())
-        .map((d) => ({ date: d.date, nota: d.nota! }))
-    );
     setLoading(false);
   }, [today, router]);
 
@@ -177,47 +155,22 @@ export default function Dashboard() {
     load();
   }, [load]);
 
-  async function salvarPeso() {
-    const valor = parseFloat(peso.replace(",", "."));
-    if (!valor || valor <= 0) return;
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from("weight_logs").upsert(
-      { user_id: user.id, date: today, peso: valor },
-      { onConflict: "user_id,date" }
-    );
-    setPesoSalvo(true);
-  }
-
-  async function salvarNota() {
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from("daily_logs").upsert(
-      { user_id: user.id, date: today, nota, agua_ml: resumo?.aguaMl ?? 0 },
-      { onConflict: "user_id,date" }
-    );
-    setNotaSalva(true);
-    setTimeout(() => setNotaSalva(false), 2000);
-  }
-
   const conquistas = ACHIEVEMENTS.filter((a) => (streak?.max ?? 0) >= a.dias);
 
   return (
-    <div className="space-y-4">
-      <header className="flex items-center justify-between pt-2">
-        <div className="flex items-center gap-2">
-          <Flame size={22} className={atRisk ? "text-amber" : "text-primary"} />
-          <h1 className="text-xl font-bold">Hoje</h1>
+    <div className="space-y-4 pb-2">
+      <header className="animate-fade-up flex items-center justify-between pt-1">
+        <div>
+          <p className="section-label">Painel do dia</p>
+          <h1 className="text-2xl font-extrabold tracking-tight">Hoje</h1>
         </div>
-        <Link href="/configuracoes" className="p-2 text-muted">
+        <Link href="/configuracoes" className="btn-ghost p-2.5">
           <Settings size={20} />
         </Link>
       </header>
 
       {isRetroactiveWindow() && (
-        <div className="rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+        <div className="card animate-fade-up border-amber/25 bg-amber/10 px-4 py-3 text-sm text-amber">
           Até 9h você ainda pode fechar{" "}
           <Link href="/dieta" className="font-semibold underline">
             o dia de ontem
@@ -230,36 +183,83 @@ export default function Dashboard() {
         <SkeletonCard />
       ) : (
         <>
-          {/* ANEL + STREAK */}
-          <section className="flex items-center gap-6 rounded-2xl bg-surface p-5">
+          <BentoCard variant="violet" className="flex animate-fade-up items-center gap-5 !min-h-0 py-5" span={2}>
             <ProgressRing pct={resumo?.pctDia ?? 0} atRisk={atRisk} />
             <div className="flex-1">
-              <p className={`text-4xl font-black tabular-nums ${atRisk ? "text-amber" : "text-primary"}`}>
+              <BentoLabel>Dia fechado</BentoLabel>
+              <p className={`bento-hero-value ${atRisk ? "text-amber" : ""}`}>
                 {streak?.current ?? 0}
               </p>
-              <p className="text-sm text-muted">
+              <p className="mt-1 text-sm text-white/50">
                 {atRisk
-                  ? "Streak em risco. Feche o dia."
+                  ? "Streak em risco — feche o dia"
                   : (streak?.current ?? 0) > 0
                     ? `dias · recorde ${streak?.max}`
-                    : "Streak zerado. Hoje decide."}
+                    : "Hoje você define o ritmo"}
               </p>
               {conquistas.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">
                   {conquistas.map((c) => (
-                    <span key={c.dias} className="inline-flex items-center gap-1 rounded-full border border-amber/30 bg-amber/10 px-2 py-0.5 text-[10px] text-amber">
+                    <span
+                      key={c.dias}
+                      className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-amber"
+                    >
                       <Trophy size={10} /> {c.nome}
                     </span>
                   ))}
                 </div>
               )}
             </div>
-          </section>
+          </BentoCard>
+
+          {atRisk && (
+            <BentoCard variant="amber" className="!min-h-0 animate-fade-up" span={2}>
+              <BentoLabel>Streak em risco</BentoLabel>
+              <p className="mb-3 text-sm text-white/70">
+                Falta pouco para fechar o dia — {Math.round(resumo?.pctDia ?? 0)}% concluído.
+              </p>
+              <div className="flex flex-col gap-2">
+                {nextMeal && (
+                  <Link
+                    href="/dieta"
+                    className="btn-primary flex items-center justify-between px-4 py-3 text-sm"
+                  >
+                    <span className="flex items-center gap-2">
+                      <UtensilsCrossed size={16} />
+                      Marcar {nextMeal.nome}
+                    </span>
+                    <ChevronRight size={16} />
+                  </Link>
+                )}
+                {scheduled && !resumo?.treinoDone && (
+                  <Link
+                    href="/treino"
+                    className="btn-ghost flex items-center justify-between border border-white/10 px-4 py-3 text-sm"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Dumbbell size={16} />
+                      Iniciar {scheduled.letra} — {scheduled.nome}
+                    </span>
+                    <ChevronRight size={16} />
+                  </Link>
+                )}
+                {(resumo?.aguaMl ?? 0) < (resumo?.metaAgua ?? 3000) && (
+                  <Link
+                    href="/dieta"
+                    className="btn-ghost flex items-center justify-between border border-white/10 px-4 py-3 text-sm"
+                  >
+                    <span>Completar hidratação</span>
+                    <ChevronRight size={16} />
+                  </Link>
+                )}
+              </div>
+            </BentoCard>
+          )}
 
           {/* PRÓXIMA AÇÃO */}
           {(nextMeal || (scheduled && !resumo?.treinoDone)) && (
-            <section className="rounded-2xl bg-surface p-4">
-              <p className="mb-2 text-xs font-semibold text-muted">Próxima ação</p>
+            <section className="card animate-fade-up p-4">
+              <p className="section-label mb-3">Próxima ação</p>
               {nextMeal && (
                 <Link href="/dieta" className="flex items-center justify-between py-2">
                   <span className="flex items-center gap-2">
@@ -282,105 +282,79 @@ export default function Dashboard() {
           )}
 
           {/* FRASE DO DIA */}
-          <section className="rounded-2xl bg-surface p-4">
+          <section className="card animate-fade-up p-4">
             <Quote size={16} className="mb-2 text-amber" />
-            <p className="text-sm leading-relaxed">{frase.t}</p>
-            <p className="mt-1 text-xs text-muted">{frase.a}</p>
+            {frase ? (
+              <>
+                <p className="text-sm leading-relaxed">{frase.t}</p>
+                <p className="mt-1 text-xs text-muted">{frase.a}</p>
+              </>
+            ) : (
+              <div className="space-y-2">
+                <div className="skeleton h-4 w-full" />
+                <div className="skeleton h-3 w-2/3" />
+              </div>
+            )}
           </section>
 
-          {/* CARDS RESUMO */}
-          <div className="grid grid-cols-2 gap-3">
-            <Link href="/dieta" className="rounded-2xl bg-surface p-4">
-              <UtensilsCrossed size={18} className="text-primary" />
-              <p className="mt-2 text-lg font-bold">
-                {resumo?.doneMeals}/{resumo?.totalMeals}
-              </p>
-              <p className="text-xs text-muted">{resumo?.kcalDone}/{resumo?.kcalTotal} kcal</p>
+          <div className="bento-grid">
+            <Link href="/dieta" className="block">
+              <BentoCard variant="amber" className="h-full transition-transform active:scale-[0.98]">
+                <BentoLabel>Refeições</BentoLabel>
+                <BentoValue sub={`${resumo?.kcalDone}/${resumo?.kcalTotal} kcal`}>
+                  {resumo?.doneMeals}/{resumo?.totalMeals}
+                </BentoValue>
+              </BentoCard>
             </Link>
-            <Link href="/treino" className="rounded-2xl bg-surface p-4">
-              <Dumbbell size={18} className={resumo?.treinoDone ? "text-primary" : "text-muted"} />
-              <p className="mt-2 text-sm font-bold">
-                {resumo?.treinoNome ?? "Descanso"}
-              </p>
-              <p className="text-xs text-muted">
-                {resumo?.treinoDone ? "concluído" : resumo?.treinoNome ? "pendente" : "—"}
-              </p>
+            <Link href="/treino" className="block">
+              <BentoCard variant="rose" className="h-full transition-transform active:scale-[0.98]">
+                <BentoLabel>Treino</BentoLabel>
+                <BentoValue
+                  sub={
+                    resumo?.treinoDone
+                      ? "concluído"
+                      : resumo?.treinoNome
+                        ? "pendente"
+                        : "descanso"
+                  }
+                >
+                  {resumo?.treinoNome?.split(" — ")[0] ?? "—"}
+                </BentoValue>
+              </BentoCard>
             </Link>
-            <Link href="/dieta" className="rounded-2xl bg-surface p-4">
-              <Droplets size={18} className="text-[#4db8ff]" />
-              <p className="mt-2 text-lg font-bold">
-                {((resumo?.aguaMl ?? 0) / 1000).toFixed(1)}L
-              </p>
-              <p className="text-xs text-muted">de {((resumo?.metaAgua ?? 3000) / 1000).toFixed(1)}L</p>
+            <Link href="/dieta" className="block">
+              <BentoCard variant="blue" className="h-full transition-transform active:scale-[0.98]">
+                <BentoLabel>Água</BentoLabel>
+                <BentoValue
+                  sub={formatLitersFromMl(resumo?.aguaMl ?? 0)}
+                >
+                  {aguasTomadas(resumo?.aguaMl ?? 0, resumo?.copoMl ?? 250)}/
+                  {totalAguas(resumo?.metaAgua ?? 3000, resumo?.copoMl ?? 250)}
+                </BentoValue>
+                <RangeBar
+                  pct={
+                    resumo?.metaAgua
+                      ? Math.min(
+                          100,
+                          Math.round(
+                            ((resumo?.aguaMl ?? 0) / resumo.metaAgua) * 100
+                          )
+                        )
+                      : 0
+                  }
+                />
+              </BentoCard>
             </Link>
-            <Link href="/motivacao" className="rounded-2xl bg-surface p-4">
-              <Timer size={18} className="text-amber" />
-              <p className="mt-2 text-lg font-bold">
-                {Math.floor((resumo?.focoMinSemana ?? 0) / 60)}h
-                {String((resumo?.focoMinSemana ?? 0) % 60).padStart(2, "0")}
-              </p>
-              <p className="text-xs text-muted">foco (7d)</p>
+            <Link href="/motivacao" className="block">
+              <BentoCard variant="slate" className="h-full transition-transform active:scale-[0.98]">
+                <BentoLabel>Foco</BentoLabel>
+                <BentoValue sub="últimos 7 dias">
+                  {Math.floor((resumo?.focoMinSemana ?? 0) / 60)}h
+                  {String((resumo?.focoMinSemana ?? 0) % 60).padStart(2, "0")}
+                </BentoValue>
+              </BentoCard>
             </Link>
           </div>
-
-          {/* REVISÃO SEMANAL (domingo) */}
-          {isSunday && (
-            <section className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
-              <p className="mb-2 flex items-center gap-2 text-sm font-semibold">
-                <AlertTriangle size={16} className="text-primary" />
-                Revisão da semana
-              </p>
-              {diarioSemana.length > 0 ? (
-                <ul className="space-y-1 text-xs text-muted">
-                  {diarioSemana.map((d) => (
-                    <li key={d.date}>
-                      <span className="text-ink">{d.date.slice(5)}:</span> {d.nota}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-muted">
-                  Nenhuma nota esta semana. Use o diário de 1 linha abaixo.
-                </p>
-              )}
-            </section>
-          )}
-
-          {/* PESO + DIÁRIO */}
-          <section className="rounded-2xl bg-surface p-4">
-            <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
-              <Scale size={16} className="text-muted" /> Peso de hoje
-            </div>
-            <div className="mb-4 flex gap-2">
-              <input
-                type="number"
-                inputMode="decimal"
-                placeholder="ex: 105.0"
-                value={peso}
-                onChange={(e) => { setPeso(e.target.value); setPesoSalvo(false); }}
-                className="flex-1 rounded-xl border border-line bg-elev px-4 py-3 outline-none focus:border-primary"
-              />
-              <button onClick={salvarPeso} className={`rounded-xl px-5 font-bold ${pesoSalvo ? "bg-primary-dim text-white" : "bg-primary text-black"}`}>
-                {pesoSalvo ? <Check size={20} /> : "kg"}
-              </button>
-            </div>
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <NotebookPen size={16} className="text-muted" /> Diário
-            </div>
-            <div className="mt-2 flex gap-2">
-              <input
-                type="text"
-                maxLength={200}
-                placeholder="1 linha de honestidade"
-                value={nota}
-                onChange={(e) => setNota(e.target.value)}
-                className="flex-1 rounded-xl border border-line bg-elev px-4 py-3 text-sm outline-none focus:border-primary"
-              />
-              <button onClick={salvarNota} className="rounded-xl border border-line bg-elev px-4 text-sm">
-                {notaSalva ? <Check size={18} className="text-primary" /> : "OK"}
-              </button>
-            </div>
-          </section>
         </>
       )}
     </div>

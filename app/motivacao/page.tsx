@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Flame, Quote, Play, Square, CheckCircle2 } from "lucide-react";
+import { Flame, Quote, Play, Square, CheckCircle2, Brain } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { todayStr } from "@/lib/dates";
+import { todayStr, daysAgoStr, formatShort } from "@/lib/dates";
+import { showToast } from "@/lib/toast";
+import BentoCard, { BentoLabel, BentoValue } from "@/components/BentoCard";
 import {
   drawInsight,
   contextualInsight,
@@ -19,6 +21,9 @@ export default function MentePage() {
   const [insight, setInsight] = useState<Insight | null>(null);
   const [contextual, setContextual] = useState<Insight | null>(null);
   const [categoria, setCategoria] = useState<Categoria | undefined>();
+  const [focoSemana, setFocoSemana] = useState<
+    { date: string; minutos: number }[]
+  >([]);
 
   useEffect(() => {
     (async () => {
@@ -27,11 +32,12 @@ export default function MentePage() {
       if (!user) return;
       const today = todayStr();
       const hour = new Date().getHours();
-      const [workout, stats, meals, mealLogs] = await Promise.all([
+      const [workout, stats, meals, mealLogs, focusRes] = await Promise.all([
         supabase.from("workout_logs").select("concluido").eq("user_id", user.id).eq("date", today).maybeSingle(),
         supabase.from("user_stats").select("current_streak").eq("user_id", user.id).maybeSingle(),
         supabase.from("meals").select("id").eq("user_id", user.id),
         supabase.from("meal_logs").select("meal_id").eq("user_id", user.id).eq("date", today),
+        supabase.from("focus_logs").select("date, minutos").eq("user_id", user.id).gte("date", daysAgoStr(6)),
       ]);
       const total = meals.data?.length ?? 0;
       const done = mealLogs.data?.length ?? 0;
@@ -44,32 +50,100 @@ export default function MentePage() {
         diaIncompleto: done < total || !treinoDone,
       };
       setContextual(contextualInsight(ctx));
+
+      const byDay: Record<string, number> = {};
+      for (const f of focusRes.data ?? []) {
+        byDay[f.date] = (byDay[f.date] ?? 0) + f.minutos;
+      }
+      const semana = Array.from({ length: 7 }, (_, i) => {
+        const d = daysAgoStr(6 - i);
+        return { date: d, minutos: byDay[d] ?? 0 };
+      });
+      setFocoSemana(semana);
     })();
   }, []);
 
+  const totalSemana = focoSemana.reduce((a, d) => a + d.minutos, 0);
+  const blocosSemana = focoSemana.filter((d) => d.minutos >= DEEP_WORK_MIN).length;
+
   return (
     <div className="space-y-4">
-      <header className="pt-2">
-        <h1 className="text-xl font-bold">Mente</h1>
-        <p className="text-xs text-muted">Choque de realidade e trabalho profundo</p>
+      <header className="animate-fade-up pt-1">
+        <p className="section-label">Foco mental</p>
+        <h1 className="text-2xl font-extrabold tracking-tight">Mente</h1>
+        <p className="mt-0.5 text-xs text-white/45">
+          Choque de realidade e trabalho profundo
+        </p>
       </header>
 
       {contextual && (
-        <section className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">Para agora</p>
+        <BentoCard variant="violet" className="!min-h-0">
+          <BentoLabel>Para agora</BentoLabel>
           <p className="text-sm leading-relaxed">{contextual.t}</p>
-          <p className="mt-1 text-xs text-muted">{contextual.a}</p>
-        </section>
+          <p className="mt-1 text-xs text-white/45">{contextual.a}</p>
+        </BentoCard>
       )}
 
+      <BentoCard variant="slate" className="!min-h-0" span={2}>
+        <div className="mb-3 flex items-center gap-2">
+          <Brain size={14} className="text-white/50" />
+          <BentoLabel>Foco esta semana</BentoLabel>
+        </div>
+        <BentoValue
+          sub={`${blocosSemana} blocos de ${DEEP_WORK_MIN} min`}
+        >
+          {Math.floor(totalSemana / 60)}h
+          {String(totalSemana % 60).padStart(2, "0")}
+        </BentoValue>
+        <div className="mt-3 flex justify-between gap-1">
+          {focoSemana.map((d) => {
+            const pct = Math.min(100, Math.round((d.minutos / DEEP_WORK_MIN) * 100));
+            return (
+              <div key={d.date} className="flex flex-1 flex-col items-center gap-1">
+                <div
+                  className="w-full overflow-hidden rounded-full bg-white/[0.06]"
+                  style={{ height: 40 }}
+                >
+                  <div
+                    className="w-full rounded-full bg-primary transition-all"
+                    style={{
+                      height: `${Math.max(4, pct)}%`,
+                      marginTop: `${100 - Math.max(4, pct)}%`,
+                    }}
+                  />
+                </div>
+                <span className="text-[9px] text-white/35">
+                  {formatShort(d.date).slice(0, 5)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </BentoCard>
+
       <div className="flex gap-2 overflow-x-auto pb-1">
-        <button onClick={() => setCategoria(undefined)} className={`shrink-0 rounded-full border px-3 py-1.5 text-xs ${!categoria ? "border-primary bg-primary/10 text-primary" : "border-line text-muted"}`}>Todas</button>
+        <button
+          onClick={() => setCategoria(undefined)}
+          className={`btn-ghost shrink-0 rounded-full px-3 py-1.5 text-xs ${
+            !categoria ? "text-primary" : ""
+          }`}
+        >
+          Todas
+        </button>
         {CATEGORIAS.map((c) => (
-          <button key={c} onClick={() => setCategoria(c)} className={`shrink-0 rounded-full border px-3 py-1.5 text-xs ${categoria === c ? "border-primary bg-primary/10 text-primary" : "border-line text-muted"}`}>{c}</button>
+          <button
+            key={c}
+            onClick={() => setCategoria(c)}
+            className={`btn-ghost shrink-0 rounded-full px-3 py-1.5 text-xs ${
+              categoria === c ? "text-primary" : ""
+            }`}
+          >
+            {c}
+          </button>
         ))}
       </div>
 
-      <section className="rounded-2xl bg-surface p-6">
+      <BentoCard variant="slate" className="p-6">
         {insight ? (
           <>
             <Quote size={22} className="mb-3 text-amber" />
@@ -79,9 +153,9 @@ export default function MentePage() {
         ) : (
           <p className="py-4 text-center text-sm text-muted">A mente que você não forja de manhã te sabota à noite.</p>
         )}
-      </section>
+      </BentoCard>
 
-      <button onClick={() => setInsight(drawInsight(categoria))} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-4 font-bold text-black">
+      <button onClick={() => setInsight(drawInsight(categoria))} className="btn-primary flex w-full items-center justify-center gap-2 py-4">
         <Flame size={20} /> Forjar Mente
       </button>
 
@@ -116,6 +190,7 @@ function DeepWork() {
     if (!user) return;
     await supabase.from("focus_logs").insert({ user_id: user.id, date: todayStr(), minutos });
     setDoneToday((d) => d + minutos);
+    showToast(`${minutos} min de foco salvos ✓`);
   }
 
   function start() {
@@ -137,7 +212,8 @@ function DeepWork() {
   function stop() {
     if (interval.current) clearInterval(interval.current);
     setRunning(false);
-    salvarSessao(startedAt.current ? Math.floor((Date.now() - startedAt.current) / 60000) : 0);
+    const mins = startedAt.current ? Math.floor((Date.now() - startedAt.current) / 60000) : 0;
+    salvarSessao(mins);
     setLeft(DEEP_WORK_MIN * 60);
   }
 
@@ -145,19 +221,53 @@ function DeepWork() {
   const ss = String(left % 60).padStart(2, "0");
 
   return (
-    <section className="rounded-2xl bg-surface p-6 text-center">
-      <p className="text-sm font-semibold">Foco profundo</p>
-      <p className="mb-4 text-xs text-muted">{DEEP_WORK_MIN} min sem distrações</p>
-      <p className={`text-6xl font-black tabular-nums ${running ? "text-primary" : ""}`}>{mm}:{ss}</p>
-      {sessionDone && <p className="mt-2 text-sm font-semibold text-primary"><CheckCircle2 size={16} className="inline" /> Bloco concluído</p>}
+    <BentoCard
+      variant="blue"
+      className={`!min-h-0 text-center ${running ? "bento-timer-active" : ""}`}
+      span={2}
+    >
+      <BentoLabel>Foco profundo</BentoLabel>
+      <p className="mb-1 text-xs text-white/45">
+        {running
+          ? "Bloco em andamento — sem distrações"
+          : `${DEEP_WORK_MIN} min sem distrações`}
+      </p>
+      <p
+        className={`text-6xl font-black tabular-nums ${running ? "text-primary animate-pulse-neon" : "text-white"}`}
+      >
+        {mm}:{ss}
+      </p>
+      {running && (
+        <p className="mt-1 text-sm font-semibold text-primary">
+          {mm}:{ss} restantes
+        </p>
+      )}
+      {sessionDone && !running && (
+        <p className="mt-2 text-sm font-semibold text-mint">
+          <CheckCircle2 size={16} className="inline" /> Bloco concluído
+        </p>
+      )}
       <div className="mt-4">
         {running ? (
-          <button onClick={stop} className="inline-flex items-center gap-2 rounded-xl border border-danger/50 px-6 py-3 font-bold text-danger"><Square size={16} /> Encerrar</button>
+          <button
+            onClick={stop}
+            className="btn-ghost inline-flex items-center gap-2 border border-danger/50 px-6 py-3 font-bold text-danger"
+          >
+            <Square size={16} /> Encerrar
+          </button>
         ) : (
-          <button onClick={start} className="inline-flex items-center gap-2 rounded-xl bg-amber px-6 py-3 font-bold text-black"><Play size={16} /> Iniciar bloco</button>
+          <button
+            onClick={start}
+            className="btn-primary inline-flex items-center gap-2 px-6 py-3"
+          >
+            <Play size={16} /> Iniciar bloco
+          </button>
         )}
       </div>
-      <p className="mt-4 text-xs text-muted">Hoje: {Math.floor(doneToday / 60)}h{String(doneToday % 60).padStart(2, "0")}</p>
-    </section>
+      <p className="mt-4 text-xs text-white/45">
+        Hoje: {Math.floor(doneToday / 60)}h
+        {String(doneToday % 60).padStart(2, "0")}
+      </p>
+    </BentoCard>
   );
 }

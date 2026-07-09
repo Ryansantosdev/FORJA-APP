@@ -35,6 +35,8 @@ import { supabaseErrorMessage, MIGRATION_HINT } from "@/lib/supabase-errors";
 import { insertWorkoutPack, DEFAULT_PACK_ID } from "@/lib/seed-workouts";
 import LoadState from "@/components/LoadState";
 import RestTimer from "@/components/RestTimer";
+import BentoCard, { BentoLabel } from "@/components/BentoCard";
+import RangeBar from "@/components/RangeBar";
 import type { Workout, ExerciseDef } from "@/lib/types";
 
 type SerieState = Record<string, number>; // exercicio → série atual (0-based)
@@ -505,9 +507,10 @@ export default function TreinoPage() {
 
   return (
     <div className="space-y-4">
-      <header className="flex items-end justify-between pt-2">
+      <header className="animate-fade-up flex items-end justify-between pt-1">
         <div>
-          <h1 className="text-xl font-bold">Treino</h1>
+          <p className="section-label">Treino</p>
+          <h1 className="text-2xl font-extrabold tracking-tight">Sessão</h1>
           <p className="text-xs text-muted">
             {scheduled
               ? `Hoje: ${scheduled.letra} — ${scheduled.nome}`
@@ -517,24 +520,22 @@ export default function TreinoPage() {
         <div className="flex gap-2">
           <button
             onClick={() => setShowTemplates(true)}
-            className="rounded-xl border border-line bg-surface p-2.5 text-muted"
+            className="btn-ghost p-2.5"
             aria-label="Modelos de treino"
           >
             <Download size={18} />
           </button>
           <button
             onClick={() => setShowAgenda(!showAgenda)}
-            className="rounded-xl border border-line bg-surface p-2.5 text-muted"
+            className="btn-ghost p-2.5"
             aria-label="Agenda semanal"
           >
             <Calendar size={18} />
           </button>
           <button
             onClick={() => setEditMode(!editMode)}
-            className={`rounded-xl border px-3 py-2 text-xs font-semibold ${
-              editMode
-                ? "border-primary/40 bg-primary/10 text-primary"
-                : "border-line bg-surface text-muted"
+            className={`btn-ghost px-3 py-2 text-xs font-semibold ${
+              editMode ? "text-primary" : ""
             }`}
           >
             {editMode ? "Pronto" : "Editar"}
@@ -544,14 +545,14 @@ export default function TreinoPage() {
 
       {/* AGENDA SEMANAL */}
       {showAgenda && (
-        <section className="rounded-2xl bg-surface p-4">
-          <p className="mb-3 text-sm font-semibold">Agenda da semana</p>
-          <div className="space-y-2">
+        <BentoCard variant="glass" className="!min-h-0" span={2}>
+          <BentoLabel>Agenda da semana</BentoLabel>
+          <div className="mt-3 space-y-2">
             {DIAS_SEMANA.map((dia, i) => (
               <div key={dia} className="flex items-center gap-2">
                 <span
                   className={`w-8 text-xs font-medium ${
-                    i === dayOfWeek() ? "text-primary" : "text-muted"
+                    i === dayOfWeek() ? "text-primary" : "text-white/45"
                   }`}
                 >
                   {dia}
@@ -564,7 +565,7 @@ export default function TreinoPage() {
                       [String(i)]: e.target.value || null,
                     })
                   }
-                  className="flex-1 rounded-xl border border-line bg-elev px-3 py-2 text-sm outline-none focus:border-primary"
+                  className="input-field flex-1 px-3 py-2 text-sm"
                 >
                   <option value="">Descanso</option>
                   {workouts.map((w) => (
@@ -576,7 +577,7 @@ export default function TreinoPage() {
               </div>
             ))}
           </div>
-        </section>
+        </BentoCard>
       )}
 
       {importFeedback && (
@@ -602,7 +603,7 @@ export default function TreinoPage() {
           <div className="flex flex-col gap-2">
             <button
               onClick={() => setShowTemplates(true)}
-              className="w-full rounded-xl bg-primary py-3 font-bold text-black"
+              className="btn-primary w-full py-3"
             >
               Ver modelos
             </button>
@@ -629,15 +630,23 @@ export default function TreinoPage() {
           {scheduled && activeId !== scheduled.id && !concluido && (
             <button
               onClick={() => iniciarTreino(scheduled)}
-              className="flex w-full items-center justify-between rounded-2xl border border-primary/30 bg-primary/10 p-4 text-left"
+              className="block w-full text-left"
             >
-              <div>
-                <p className="text-xs text-primary">Treino do dia</p>
-                <p className="font-bold">
-                  {scheduled.letra} — {scheduled.nome}
-                </p>
-              </div>
-              <ChevronRight className="text-primary" />
+              <BentoCard
+                variant="rose"
+                className="!min-h-0 transition-transform active:scale-[0.98]"
+                span={2}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <BentoLabel>Treino do dia</BentoLabel>
+                    <p className="text-lg font-bold">
+                      {scheduled.letra} — {scheduled.nome}
+                    </p>
+                  </div>
+                  <ChevronRight className="text-white/50" />
+                </div>
+              </BentoCard>
             </button>
           )}
 
@@ -645,34 +654,37 @@ export default function TreinoPage() {
           {(!active || editMode) && workouts.length > 0 && (
             <div className="space-y-2">
               {workouts.map((w) => (
-                <div
+                <BentoCard
                   key={w.id}
-                  className="flex items-center gap-2 rounded-2xl bg-surface p-3"
+                  variant="slate"
+                  className="!min-h-0 !p-3"
                 >
-                  <button
-                    onClick={() => !editMode && iniciarTreino(w)}
-                    className="flex flex-1 items-center gap-3 text-left"
-                  >
-                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-elev text-lg font-black text-primary">
-                      {w.letra}
-                    </span>
-                    <div>
-                      <p className="font-semibold">{w.nome}</p>
-                      <p className="text-xs text-muted">
-                        {w.exercicios.length} exercícios
-                        {w.letra === "BX" ? " · Boxe" : ""}
-                      </p>
-                    </div>
-                  </button>
-                  {editMode && (
+                  <div className="flex items-center gap-2">
                     <button
-                      onClick={() => setEditing(w)}
-                      className="p-2 text-muted"
+                      onClick={() => !editMode && iniciarTreino(w)}
+                      className="flex flex-1 items-center gap-3 text-left"
                     >
-                      <Pencil size={16} />
+                      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.08] text-lg font-black text-primary">
+                        {w.letra}
+                      </span>
+                      <div>
+                        <p className="font-semibold">{w.nome}</p>
+                        <p className="text-xs text-white/45">
+                          {w.exercicios.length} exercícios
+                          {w.letra === "BX" ? " · Boxe" : ""}
+                        </p>
+                      </div>
                     </button>
-                  )}
-                </div>
+                    {editMode && (
+                      <button
+                        onClick={() => setEditing(w)}
+                        className="btn-ghost p-2"
+                      >
+                        <Pencil size={16} />
+                      </button>
+                    )}
+                  </div>
+                </BentoCard>
               ))}
               {editMode && (
                 <div className="flex gap-2">
@@ -686,13 +698,13 @@ export default function TreinoPage() {
                         exercicios: [],
                       })
                     }
-                    className="flex flex-1 items-center justify-center gap-1 rounded-xl border border-dashed border-line py-3 text-sm text-muted"
+                    className="btn-ghost flex flex-1 items-center justify-center gap-1 border border-dashed border-white/15 py-3 text-sm"
                   >
                     <Plus size={16} /> Novo treino
                   </button>
                   <button
                     onClick={() => setShowTemplates(true)}
-                    className="flex flex-1 items-center justify-center gap-1 rounded-xl border border-line bg-elev py-3 text-sm text-muted"
+                    className="btn-ghost flex flex-1 items-center justify-center gap-1 py-3 text-sm"
                   >
                     <Download size={16} /> Modelos
                   </button>
@@ -704,17 +716,38 @@ export default function TreinoPage() {
           {/* SESSÃO ATIVA */}
           {active && !editMode && (
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between px-1">
                 <p className="text-lg font-bold">
                   {active.letra} — {active.nome}
                 </p>
                 <button
                   onClick={() => setActiveId(null)}
-                  className="text-xs text-muted"
+                  className="btn-ghost px-2 py-1 text-xs"
                 >
                   Trocar
                 </button>
               </div>
+
+              {(() => {
+                const exDone = active.exercicios.filter(
+                  (ex) => (serieAtual[ex.nome] ?? 0) >= ex.series
+                ).length;
+                const exTotal = active.exercicios.length;
+                const pctSessao = exTotal
+                  ? Math.round((exDone / exTotal) * 100)
+                  : 0;
+                return (
+                  <BentoCard variant="glass" className="!min-h-0 !py-3" span={2}>
+                    <div className="mb-2 flex items-center justify-between text-xs">
+                      <BentoLabel>Progresso da sessão</BentoLabel>
+                      <span className="font-bold text-white/70">
+                        {exDone}/{exTotal} exercícios
+                      </span>
+                    </div>
+                    <RangeBar pct={pctSessao} color="white" />
+                  </BentoCard>
+                );
+              })()}
 
               {active.exercicios.map((ex) => {
                 const serie = serieAtual[ex.nome] ?? 0;
@@ -725,27 +758,33 @@ export default function TreinoPage() {
                 const isTimeBased = ex.reps_alvo.includes("min");
 
                 return (
-                  <section
+                  <BentoCard
                     key={ex.nome}
-                    className={`rounded-2xl p-4 ${
-                      done ? "bg-primary/5" : "bg-surface"
-                    }`}
+                    variant={done ? "mint" : "glass"}
+                    className="!min-h-0"
+                    span={2}
                   >
                     <div className="flex items-start justify-between">
                       <div>
-                        <p className={`font-semibold ${done ? "text-primary" : ""}`}>
+                        <p
+                          className={`font-semibold ${done ? "text-mint" : ""}`}
+                        >
                           {ex.nome}
                         </p>
-                        <p className="text-xs text-muted">
+                        <p className="text-xs text-white/45">
                           Série {Math.min(serie + 1, total)} de {total} · alvo{" "}
                           {ex.reps_alvo}
                           {last && !isTimeBased
-                            ? ` · última ${last.carga}kg×${last.reps}`
+                            ? ` · última ${last.carga} kg × ${last.reps}`
                             : ""}
                         </p>
                       </div>
                       {done && (
-                        <Check size={20} className="text-primary" strokeWidth={3} />
+                        <Check
+                          size={20}
+                          className="text-mint"
+                          strokeWidth={3}
+                        />
                       )}
                     </div>
 
@@ -766,41 +805,57 @@ export default function TreinoPage() {
                               });
                               setTimerKey(Date.now());
                             }}
-                            className="flex-1 rounded-xl bg-primary py-3 font-bold text-black"
+                            className="btn-primary flex-1 py-3"
                           >
                             {ex.reps_alvo} — concluir
                           </button>
                         ) : (
                           <>
-                            <input
-                              type="number"
-                              inputMode="decimal"
-                              placeholder={last ? `${last.carga}` : "kg"}
-                              value={input.carga}
-                              onChange={(e) =>
-                                setInputs({
-                                  ...inputs,
-                                  [ex.nome]: { ...input, carga: e.target.value },
-                                })
-                              }
-                              className="w-20 rounded-xl border border-line bg-elev px-3 py-3 text-center outline-none focus:border-primary"
-                            />
-                            <input
-                              type="number"
-                              inputMode="numeric"
-                              placeholder={last ? `${last.reps}` : "reps"}
-                              value={input.reps}
-                              onChange={(e) =>
-                                setInputs({
-                                  ...inputs,
-                                  [ex.nome]: { ...input, reps: e.target.value },
-                                })
-                              }
-                              className="w-20 rounded-xl border border-line bg-elev px-3 py-3 text-center outline-none focus:border-primary"
-                            />
+                            <div className="flex w-24 flex-col">
+                              <label className="mb-1 text-[10px] text-white/40">
+                                kg
+                              </label>
+                              <input
+                                type="number"
+                                inputMode="decimal"
+                                placeholder={last ? `${last.carga}` : "0"}
+                                value={input.carga}
+                                onChange={(e) =>
+                                  setInputs({
+                                    ...inputs,
+                                    [ex.nome]: {
+                                      ...input,
+                                      carga: e.target.value,
+                                    },
+                                  })
+                                }
+                                className="input-field w-full px-3 py-3 text-center"
+                              />
+                            </div>
+                            <div className="flex w-24 flex-col">
+                              <label className="mb-1 text-[10px] text-white/40">
+                                reps
+                              </label>
+                              <input
+                                type="number"
+                                inputMode="numeric"
+                                placeholder={last ? `${last.reps}` : "0"}
+                                value={input.reps}
+                                onChange={(e) =>
+                                  setInputs({
+                                    ...inputs,
+                                    [ex.nome]: {
+                                      ...input,
+                                      reps: e.target.value,
+                                    },
+                                  })
+                                }
+                                className="input-field w-full px-3 py-3 text-center"
+                              />
+                            </div>
                             <button
                               onClick={() => registrarSerie(ex)}
-                              className="flex-1 rounded-xl bg-primary py-3 font-bold text-black"
+                              className="btn-primary mt-5 flex-1 self-end py-3"
                             >
                               Registrar
                             </button>
@@ -808,7 +863,7 @@ export default function TreinoPage() {
                         )}
                       </div>
                     )}
-                  </section>
+                  </BentoCard>
                 );
               })}
 
@@ -817,8 +872,8 @@ export default function TreinoPage() {
                 disabled={concluido}
                 className={`flex w-full items-center justify-center gap-2 rounded-2xl py-4 font-bold ${
                   concluido
-                    ? "border border-primary/40 bg-primary/10 text-primary"
-                    : "bg-primary text-black"
+                    ? "border border-mint/40 bg-mint/10 text-mint"
+                    : "btn-primary"
                 }`}
               >
                 {concluido ? (
@@ -843,7 +898,7 @@ export default function TreinoPage() {
           onClick={() => !importingId && setShowTemplates(false)}
         >
           <div
-            className="max-h-[80dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5"
+            className="max-h-[80dvh] w-full max-w-md overflow-y-auto rounded-t-3xl border-t border-white/10 bg-[#0a0a0c] p-5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-4 flex items-center justify-between">
@@ -857,7 +912,7 @@ export default function TreinoPage() {
                 key={p.id}
                 disabled={!!importingId}
                 onClick={() => importarTemplate(p.id)}
-                className="mb-2 w-full rounded-xl border border-line bg-elev p-4 text-left disabled:opacity-50"
+                className="btn-ghost mb-2 w-full p-4 text-left disabled:opacity-50"
               >
                 <p className="font-semibold">
                   {importingId === p.id ? "Importando..." : p.nome}
@@ -902,7 +957,7 @@ function WorkoutEditor({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/70">
-      <div className="max-h-[88dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5 pb-[calc(env(safe-area-inset-bottom)+20px)]">
+      <div className="max-h-[88dvh] w-full max-w-md overflow-y-auto rounded-t-3xl border-t border-white/10 bg-[#0a0a0c] p-5 pb-[calc(env(safe-area-inset-bottom)+20px)]">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">
             {workout.id === "nova" ? "Novo treino" : "Editar treino"}
@@ -916,17 +971,17 @@ function WorkoutEditor({
             value={letra}
             onChange={(e) => setLetra(e.target.value.toUpperCase())}
             placeholder="Letra (A, BX...)"
-            className="w-24 rounded-xl border border-line bg-elev px-3 py-3 text-center outline-none focus:border-primary"
+            className="w-24 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3 text-center outline-none focus:border-primary"
           />
           <input
             value={nome}
             onChange={(e) => setNome(e.target.value)}
             placeholder="Nome do treino"
-            className="flex-1 rounded-xl border border-line bg-elev px-3 py-3 outline-none focus:border-primary"
+            className="flex-1 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3 outline-none focus:border-primary"
           />
         </div>
         {exs.map((ex, i) => (
-          <div key={i} className="mb-2 rounded-xl bg-elev p-3">
+          <div key={i} className="mb-2 rounded-xl bg-white/[0.04] p-3">
             <div className="flex gap-2">
               <input
                 value={ex.nome}
@@ -951,7 +1006,7 @@ function WorkoutEditor({
                     )
                   )
                 }
-                className="w-16 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-center"
+                className="w-16 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-2 text-sm text-center"
               />
               <span className="self-center text-xs text-muted">séries</span>
               <input
@@ -973,7 +1028,7 @@ function WorkoutEditor({
           onClick={() =>
             setExs([...exs, { nome: "", series: 3, reps_alvo: "8-10" }])
           }
-          className="mb-4 w-full rounded-xl border border-dashed border-line py-3 text-sm text-muted"
+          className="btn-ghost mb-4 w-full border border-dashed border-white/15 py-3 text-sm"
         >
           + Exercício
         </button>
@@ -981,7 +1036,7 @@ function WorkoutEditor({
           {onDelete && (
             <button
               onClick={onDelete}
-              className="rounded-xl border border-danger/40 px-4 py-3 text-sm text-danger"
+              className="btn-ghost border border-danger/40 px-4 py-3 text-sm text-danger"
             >
               Excluir
             </button>
@@ -990,7 +1045,7 @@ function WorkoutEditor({
             onClick={() =>
               letra.trim() && nome.trim() && onSave({ ...workout, letra, nome, exercicios: exs })
             }
-            className="flex-1 rounded-xl bg-primary py-3 font-bold text-black"
+            className="btn-primary flex-1 py-3"
           >
             Salvar
           </button>

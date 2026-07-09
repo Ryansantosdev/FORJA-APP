@@ -37,6 +37,7 @@ export type UserStats = {
 export type UserSettings = {
   meta_agua_ml: number;
   copo_ml: number;
+  meta_proteina_g: number;
   meta_peso: number | null;
   agua_lembrete_horas: number[];
   hora_lembrete_metas: number;

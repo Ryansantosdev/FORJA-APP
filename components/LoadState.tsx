@@ -1,6 +1,6 @@
 "use client";
 
-import { RefreshCw, AlertTriangle } from "lucide-react";
+import { RefreshCw, AlertTriangle, Inbox } from "lucide-react";
 import { SkeletonCard } from "./Skeleton";
 
 type Props = {
@@ -30,13 +30,15 @@ export default function LoadState({
 
   if (error) {
     return (
-      <div className="rounded-2xl border border-danger/30 bg-surface p-5 text-center">
-        <AlertTriangle size={28} className="mx-auto mb-2 text-danger" />
-        <p className="text-sm font-semibold">Não foi possível carregar</p>
-        <p className="mt-1 text-xs text-muted">{error}</p>
+      <div className="card animate-fade-up p-6 text-center">
+        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-danger/10">
+          <AlertTriangle size={24} className="text-danger" />
+        </div>
+        <p className="font-semibold">Não foi possível carregar</p>
+        <p className="mt-1 text-xs leading-relaxed text-muted">{error}</p>
         <button
           onClick={onRetry}
-          className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-black"
+          className="btn-primary mt-4 inline-flex items-center gap-2 px-5 py-2.5 text-sm"
         >
           <RefreshCw size={16} /> Tentar de novo
         </button>
@@ -46,13 +48,16 @@ export default function LoadState({
 
   if (empty) {
     return (
-      <div className="rounded-2xl border border-dashed border-line bg-surface/50 p-6 text-center">
+      <div className="card animate-fade-up border-dashed p-8 text-center">
+        <Inbox size={28} className="mx-auto mb-2 text-muted/50" />
         <p className="font-semibold">{emptyTitle ?? "Nada aqui ainda"}</p>
-        {emptyDesc && <p className="mt-2 text-sm text-muted">{emptyDesc}</p>}
-        {emptyAction && <div className="mt-4">{emptyAction}</div>}
+        {emptyDesc && (
+          <p className="mt-2 text-sm leading-relaxed text-muted">{emptyDesc}</p>
+        )}
+        {emptyAction && <div className="mt-5">{emptyAction}</div>}
       </div>
     );
   }
 
-  return <>{children}</>;
+  return <div className="animate-fade-up space-y-3">{children}</div>;
 }

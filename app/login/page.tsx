@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Flame, AlertTriangle } from "lucide-react";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import BentoCard, { BentoLabel } from "@/components/BentoCard";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -50,51 +51,49 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-[80dvh] flex-col justify-center">
-      <div className="mb-10 text-center">
-        <Flame size={48} className="mx-auto mb-3 text-primary" />
-        <h1 className="text-3xl font-bold tracking-tight">FORJA</h1>
-        <p className="mt-1 text-sm text-muted">
+      <div className="mb-10 animate-fade-up text-center">
+        <BentoCard variant="violet" className="mx-auto mb-6 !min-h-0 inline-flex h-16 w-16 items-center justify-center !p-0">
+          <Flame size={32} className="text-white" />
+        </BentoCard>
+        <h1 className="text-3xl font-extrabold tracking-tight">FORJA</h1>
+        <p className="mt-2 text-sm text-white/45">
           Disciplina não se encontra. Se constrói.
         </p>
       </div>
 
       {!configured ? (
-        <div className="rounded-2xl border border-amber/40 bg-surface p-5 text-sm leading-relaxed">
-          <div className="mb-2 flex items-center gap-2 font-semibold text-amber">
+        <BentoCard variant="amber" className="text-sm leading-relaxed">
+          <div className="mb-2 flex items-center gap-2 font-semibold">
             <AlertTriangle size={18} /> Supabase não configurado
           </div>
-          <ol className="list-decimal space-y-2 pl-5 text-muted">
+          <ol className="list-decimal space-y-2 pl-5 text-white/55">
             <li>
               Crie um projeto gratuito em{" "}
-              <span className="text-ink">supabase.com</span>
+              <span className="text-white">supabase.com</span>
             </li>
             <li>
-              Copie a <span className="text-ink">URL</span> e a{" "}
-              <span className="text-ink">anon key</span> (Settings → API Keys)
+              Copie a <span className="text-white">URL</span> e a{" "}
+              <span className="text-white">anon key</span>
             </li>
             <li>
-              Cole no arquivo <span className="text-ink">.env.local</span> na
-              raiz do projeto
+              Cole no <span className="text-white">.env.local</span>
             </li>
             <li>
-              Rode o <span className="text-ink">supabase/schema.sql</span> no
-              SQL Editor
+              Rode o <span className="text-white">supabase/schema.sql</span>
             </li>
             <li>Reinicie o servidor (npm run dev)</li>
           </ol>
-          <p className="mt-3 text-xs text-muted">
-            O passo a passo completo está no README.md.
-          </p>
-        </div>
+        </BentoCard>
       ) : (
-        <form onSubmit={handleSubmit} className="space-y-3">
+        <form onSubmit={handleSubmit} className="animate-fade-up space-y-3">
+        <p className="section-label">Acesso</p>
           <input
             type="email"
             required
             placeholder="E-mail"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-xl border border-line bg-surface px-4 py-3.5 text-base outline-none focus:border-primary"
+            className="input-field w-full px-4 py-3.5 text-base"
           />
           <input
             type="password"
@@ -103,14 +102,14 @@ export default function LoginPage() {
             placeholder="Senha (mín. 6 caracteres)"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-xl border border-line bg-surface px-4 py-3.5 text-base outline-none focus:border-primary"
+            className="input-field w-full px-4 py-3.5 text-base"
           />
           {error && <p className="text-sm text-danger">{error}</p>}
-          {info && <p className="text-sm text-primary">{info}</p>}
+          {info && <p className="text-sm text-mint">{info}</p>}
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-xl bg-primary py-3.5 font-bold text-black transition-opacity disabled:opacity-50"
+            className="btn-primary w-full py-3.5 disabled:opacity-50"
           >
             {loading
               ? "Aguarde..."
@@ -124,7 +123,7 @@ export default function LoginPage() {
               setMode(mode === "login" ? "signup" : "login");
               setError(null);
             }}
-            className="w-full py-2 text-sm text-muted"
+            className="w-full py-2 text-sm text-white/45"
           >
             {mode === "login"
               ? "Primeira vez? Criar conta"

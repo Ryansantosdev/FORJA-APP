@@ -280,6 +280,11 @@ export function drawInsight(categoria?: Categoria): Insight {
   return pick.ins;
 }
 
+/** Frase ao abrir o app — sorteia uma nova a cada visita à tela. */
+export function insightOnAppOpen(): Insight {
+  return drawInsight();
+}
+
 /** Frase do dia — determinística pela data (mesma frase o dia todo). */
 export function insightOfTheDay(dateStr: string): Insight {
   let hash = 0;

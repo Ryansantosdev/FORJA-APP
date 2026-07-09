@@ -12,10 +12,13 @@ import {
   urlBase64ToUint8Array,
 } from "@/lib/push";
 import type { UserSettings } from "@/lib/types";
+import { mlDeLitros } from "@/lib/agua";
+import { formatLitersFromMl } from "@/lib/format";
 
 const DEFAULTS: UserSettings = {
   meta_agua_ml: 3000,
   copo_ml: 250,
+  meta_proteina_g: 150,
   meta_peso: null,
   agua_lembrete_horas: [8, 11, 14, 17, 20],
   hora_lembrete_metas: 21,
@@ -66,6 +69,7 @@ export default function ConfiguracoesPage() {
       user_id: user.id,
       meta_agua_ml: s.meta_agua_ml,
       copo_ml: s.copo_ml,
+      meta_proteina_g: s.meta_proteina_g,
       meta_peso: s.meta_peso || null,
       agua_lembrete_horas: s.agua_lembrete_horas,
       hora_lembrete_metas: s.hora_lembrete_metas,
@@ -134,15 +138,30 @@ export default function ConfiguracoesPage() {
 
   return (
     <div className="space-y-4">
-      <header className="flex items-center gap-3 pt-2">
-        <Link href="/" className="p-1 text-muted"><ArrowLeft size={20} /></Link>
-        <h1 className="text-xl font-bold">Configurações</h1>
+      <header className="animate-fade-up flex items-center gap-3 pt-2">
+        <Link href="/" className="btn-ghost p-2"><ArrowLeft size={20} /></Link>
+        <h1 className="text-2xl font-bold tracking-tight">Configurações</h1>
       </header>
 
-      <section className="space-y-3 rounded-2xl bg-surface p-4">
-        <p className="text-sm font-semibold">Água</p>
-        <Row label="Meta diária (ml)"><NumInput value={s.meta_agua_ml} onChange={(v) => setS({ ...s, meta_agua_ml: v })} /></Row>
-        <Row label="Tamanho do copo (ml)"><NumInput value={s.copo_ml} onChange={(v) => setS({ ...s, copo_ml: v })} /></Row>
+      <section className="card space-y-3 p-4">
+        <p className="section-label">Água</p>
+        <Row label="Meta diária (litros)">
+          <LitrosInput
+            ml={s.meta_agua_ml}
+            onChange={(ml) => setS({ ...s, meta_agua_ml: ml })}
+          />
+        </Row>
+        <Row label="Tamanho do copo (ml)">
+          <NumInput
+            value={s.copo_ml}
+            onChange={(v) => setS({ ...s, copo_ml: v })}
+          />
+        </Row>
+        <p className="text-xs text-white/45">
+          ≈ {Math.ceil(s.meta_agua_ml / (s.copo_ml || 250))} águas · meta{" "}
+          {formatLitersFromMl(s.meta_agua_ml)} · copo{" "}
+          {formatLitersFromMl(s.copo_ml)}
+        </p>
         <p className="text-xs text-muted">Lembretes de água (5× ao dia, horários):</p>
         <div className="flex flex-wrap gap-2">
           {s.agua_lembrete_horas.map((h, i) => (
@@ -157,9 +176,20 @@ export default function ConfiguracoesPage() {
         </div>
       </section>
 
-      <section className="space-y-3 rounded-2xl bg-surface p-4">
-        <p className="text-sm font-semibold">Peso e metas</p>
-        <Row label="Meta de peso (kg)"><NumInput value={s.meta_peso ?? 0} onChange={(v) => setS({ ...s, meta_peso: v || null })} /></Row>
+      <section className="card space-y-3 p-4">
+        <p className="section-label">Peso e metas</p>
+        <Row label="Meta de peso (kg)">
+          <NumInput
+            value={s.meta_peso ?? 0}
+            onChange={(v) => setS({ ...s, meta_peso: v || null })}
+          />
+        </Row>
+        <Row label="Meta de proteína (g/dia)">
+          <NumInput
+            value={s.meta_proteina_g}
+            onChange={(v) => setS({ ...s, meta_proteina_g: v })}
+          />
+        </Row>
         <Row label="Lembrete de metas (hora)"><NumInput value={s.hora_lembrete_metas} onChange={(v) => setS({ ...s, hora_lembrete_metas: v })} /></Row>
         <Row label="Lembretes ativos">
           <button onClick={() => setS({ ...s, lembretes_ativos: !s.lembretes_ativos })}
@@ -169,7 +199,7 @@ export default function ConfiguracoesPage() {
         </Row>
       </section>
 
-      <button onClick={salvar} className="w-full rounded-2xl bg-primary py-4 font-bold text-black">
+      <button onClick={salvar} className="btn-primary w-full py-4">
         {saved ? <span className="inline-flex items-center gap-2"><Check size={18} /> Salvo</span> : "Salvar"}
       </button>
 
@@ -231,8 +261,32 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   return <div className="flex items-center justify-between gap-3"><span className="text-sm text-muted">{label}</span>{children}</div>;
 }
 
+function LitrosInput({
+  ml,
+  onChange,
+}: {
+  ml: number;
+  onChange: (ml: number) => void;
+}) {
+  const litros = (ml / 1000).toFixed(1);
+  return (
+    <input
+      type="number"
+      step="0.1"
+      min="0.5"
+      max="10"
+      value={litros}
+      onChange={(e) => {
+        const l = parseFloat(e.target.value.replace(",", ".")) || 0;
+        onChange(mlDeLitros(l));
+      }}
+      className="input-field w-20 px-3 py-2 text-center text-sm"
+    />
+  );
+}
+
 function NumInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return <input type="number" value={value || ""} onChange={(e) => onChange(parseInt(e.target.value) || 0)}
-    className="w-24 rounded-xl border border-line bg-elev px-3 py-2 text-center text-sm outline-none focus:border-primary" />;
+    className="input-field w-24 px-3 py-2 text-center text-sm" />;
 }
 

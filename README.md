@@ -159,7 +159,7 @@ Permite que a IA do Cursor veja e gerencie seu banco.
 | Aba | O que faz |
 | --- | --- |
 | **Hoje** | Anel de progresso, streak, próxima ação, peso, diário |
-| **Dieta** | Cardápio editável, swipe para marcar, kcal + proteína, água |
+| **Dieta** | Cardápio editável, swipe para marcar, kcal + proteína, água em “águas” |
 | **Treino** | ABC + Boxe, agenda semanal, templates, séries guiadas, timer 90s |
 | **Mente** | Insights contextuais, Deep Work 50min |
 | **Progresso** | Peso + média 7d, heatmap, volume semanal, CSV *(layout atual — ver roadmap abaixo)* |
@@ -170,8 +170,8 @@ Permite que a IA do Cursor veja e gerencie seu banco.
 
 | Parte | Foco |
 | --- | --- |
-| **3 — Layout** | Design moderno em todo o app (cards, tipografia, animações leves) |
-| **4 — Dieta** | Água em “águas”, meta em litros, proteína, swipe refinado |
+| **3 — Layout** | ✅ Design moderno (cards, gradiente, animações, nav) |
+| **4 — Dieta** | ✅ Águas, meta em litros, proteína, swipe refinado |
 | **5 — Auth** | Esqueci senha |
 | **6 — Onboarding** | Configuração inicial multiusuário |
 | **7 — Progresso** | Tela gamificada e intuitiva (ver abaixo) |
@@ -223,6 +223,10 @@ git push
 ```
 
 A Vercel detecta o push na branch `main` e faz **deploy automático** em ~1–2 min.
+
+**Migrações Supabase** (rode no SQL Editor quando indicado):
+- `supabase/migration-v2.sql` — treinos editáveis
+- `supabase/migration-v3.sql` — meta de proteína (g/dia)
 
 ### Pelo Cursor (interface visual)
 
