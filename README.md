@@ -150,7 +150,7 @@ https://forja-app-weld.vercel.app/api/push/send?secret=SEU_CRON_SECRET
 
 Resposta esperada: `{"ok":true,"hora":14,"enviados":1}` (números variam).
 
-> O cron da Vercel roda **a cada hora** (`0 * * * *`). Frases só saem quando a hora atual cai no intervalo (ex.: a cada 1 h = 8h, 9h, 10h… até 21h).
+> No plano **Hobby** da Vercel o cron roda **1× por dia** (`0 11 * * *`, ~8h BRT). Para lembretes a cada hora, use um serviço externo (ex. [cron-job.org](https://cron-job.org)) chamando a URL acima a cada hora.
 
 ---
 
