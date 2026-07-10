@@ -30,6 +30,8 @@ import WaterTracker from "@/components/WaterTracker";
 import BottomSheet from "@/components/BottomSheet";
 import { useDailyData, invalidateDailyCache } from "@/components/DailyDataProvider";
 import { patchDailyAguaMl, scheduleDailyInvalidate } from "@/lib/patch-daily";
+import { cardapioSemProteina } from "@/lib/nutrition";
+import { suggestProteinG } from "@/lib/protein-suggestions";
 import { showToast } from "@/lib/toast";
 import type { Meal, MealItem } from "@/lib/types";
 
@@ -428,6 +430,7 @@ export default function DietaPage() {
   const isYesterday = activeDate === yesterdayStr();
   const canRetro = isRetroactiveWindow();
   const showWater = activeDate === today;
+  const semProteina = cardapioSemProteina(meals);
 
   return (
     <div className="space-y-4 pb-2">
@@ -472,6 +475,20 @@ export default function DietaPage() {
           copoMl={copoMl}
           onAdd={adicionarAgua}
         />
+      )}
+
+      {semProteina && meals.length > 0 && (
+        <div className="card border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+          Itens sem proteína cadastrada. Toque em{" "}
+          <button
+            type="button"
+            onClick={() => setEditMode(true)}
+            className="font-semibold underline"
+          >
+            Editar
+          </button>{" "}
+          e preencha &quot;prot g&quot; em cada alimento (ou rode migration-v5 no Supabase).
+        </div>
       )}
 
       {/* Macros */}
@@ -718,6 +735,15 @@ function MealEditor({
     setItens(itens.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
   }
 
+  function onItemNameBlur(i: number, nome: string) {
+    const item = itens[i];
+    if (!item || item.proteina_g) return;
+    const suggested = suggestProteinG(nome);
+    if (suggested !== undefined) {
+      setItem(i, { proteina_g: suggested });
+    }
+  }
+
   const totalProt = itens.reduce((a, i) => a + (i.proteina_g || 0), 0);
   const totalKcal = itens.reduce((a, i) => a + (i.kcal || 0), 0);
 
@@ -763,6 +789,7 @@ function MealEditor({
                 <input
                   value={item.nome}
                   onChange={(e) => setItem(i, { nome: e.target.value })}
+                  onBlur={(e) => onItemNameBlur(i, e.target.value)}
                   placeholder="Alimento"
                   className="input-field min-w-0 flex-1 px-3 py-2 text-sm"
                 />

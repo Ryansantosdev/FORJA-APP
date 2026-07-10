@@ -169,26 +169,26 @@ begin
 
   insert into public.meals (user_id, ordem, nome, icone, itens) values
   (uid, 1, 'Café da Manhã', 'coffee', '[
-    {"nome": "Ovos", "quantidade": "150g", "kcal": 215, "substituicoes": []},
-    {"nome": "Requeijão light", "quantidade": "30g", "kcal": 55, "substituicoes": []},
-    {"nome": "Pão", "quantidade": "50g", "kcal": 140, "substituicoes": ["1 pão francês", "2 fatias de pão de forma"]},
-    {"nome": "Fruta", "quantidade": "100g", "kcal": 60, "substituicoes": ["Maçã", "Mamão", "Morango"]},
-    {"nome": "Café puro / bebida zero", "quantidade": "-", "kcal": 0, "substituicoes": []}
+    {"nome": "Ovos", "quantidade": "150g", "kcal": 215, "proteina_g": 19, "substituicoes": []},
+    {"nome": "Requeijão light", "quantidade": "30g", "kcal": 55, "proteina_g": 2, "substituicoes": []},
+    {"nome": "Pão", "quantidade": "50g", "kcal": 140, "proteina_g": 4, "substituicoes": ["1 pão francês", "2 fatias de pão de forma"]},
+    {"nome": "Fruta", "quantidade": "100g", "kcal": 60, "proteina_g": 1, "substituicoes": ["Maçã", "Mamão", "Morango"]},
+    {"nome": "Café puro / bebida zero", "quantidade": "-", "kcal": 0, "proteina_g": 0, "substituicoes": []}
   ]'::jsonb),
   (uid, 2, 'Almoço', 'utensils', '[
-    {"nome": "Proteína (frango ou carne)", "quantidade": "120g pronta", "kcal": 220, "substituicoes": ["120g frango", "100g patinho"]},
-    {"nome": "Batata inglesa", "quantidade": "150g pronta", "kcal": 130, "substituicoes": []},
-    {"nome": "Salada / vegetais", "quantidade": "150g", "kcal": 30, "substituicoes": []}
+    {"nome": "Proteína (frango ou carne)", "quantidade": "120g pronta", "kcal": 220, "proteina_g": 28, "substituicoes": ["120g frango", "100g patinho"]},
+    {"nome": "Batata inglesa", "quantidade": "150g pronta", "kcal": 130, "proteina_g": 3, "substituicoes": []},
+    {"nome": "Salada / vegetais", "quantidade": "150g", "kcal": 30, "proteina_g": 2, "substituicoes": []}
   ]'::jsonb),
   (uid, 3, 'Lanche / Suplementação', 'apple', '[
-    {"nome": "Fruta", "quantidade": "100g", "kcal": 60, "substituicoes": ["Maçã", "Mamão", "Morango"]},
-    {"nome": "Whey Protein", "quantidade": "30g", "kcal": 120, "substituicoes": []},
-    {"nome": "Creatina", "quantidade": "5g", "kcal": 0, "substituicoes": []}
+    {"nome": "Fruta", "quantidade": "100g", "kcal": 60, "proteina_g": 1, "substituicoes": ["Maçã", "Mamão", "Morango"]},
+    {"nome": "Whey Protein", "quantidade": "30g", "kcal": 120, "proteina_g": 24, "substituicoes": []},
+    {"nome": "Creatina", "quantidade": "5g", "kcal": 0, "proteina_g": 0, "substituicoes": []}
   ]'::jsonb),
   (uid, 4, 'Jantar', 'moon', '[
-    {"nome": "Proteína (frango ou carne)", "quantidade": "120g pronta", "kcal": 220, "substituicoes": ["120g frango", "100g patinho"]},
-    {"nome": "Batata inglesa", "quantidade": "150g pronta", "kcal": 130, "substituicoes": []},
-    {"nome": "Salada / vegetais", "quantidade": "150g", "kcal": 30, "substituicoes": []}
+    {"nome": "Proteína (frango ou carne)", "quantidade": "120g pronta", "kcal": 220, "proteina_g": 28, "substituicoes": ["120g frango", "100g patinho"]},
+    {"nome": "Batata inglesa", "quantidade": "150g pronta", "kcal": 130, "proteina_g": 3, "substituicoes": []},
+    {"nome": "Salada / vegetais", "quantidade": "150g", "kcal": 30, "proteina_g": 2, "substituicoes": []}
   ]'::jsonb);
 end;
 $$;

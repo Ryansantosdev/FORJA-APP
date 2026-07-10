@@ -42,6 +42,18 @@ import type { Workout, ExerciseDef } from "@/lib/types";
 
 type SerieState = Record<string, number>; // exercicio → série atual (0-based)
 
+function sessaoProgress(exercicios: ExerciseDef[], series: SerieState) {
+  const seriesDone = exercicios.reduce(
+    (n, ex) => n + Math.min(series[ex.nome] ?? 0, ex.series),
+    0
+  );
+  const seriesTotal = exercicios.reduce((n, ex) => n + ex.series, 0);
+  const exDone = exercicios.filter(
+    (ex) => (series[ex.nome] ?? 0) >= ex.series
+  ).length;
+  return { seriesDone, seriesTotal, exDone, exTotal: exercicios.length };
+}
+
 function migrationUserMessage(code: string): string {
   if (code === "MIGRATION_WORKOUTS") {
     return `Tabela de treinos não encontrada. ${MIGRATION_HINT}`;
@@ -365,6 +377,15 @@ export default function TreinoPage() {
   async function iniciarTreino(w: Workout) {
     setActiveId(w.id);
     setConcluido(false);
+    setSerieAtual({});
+    patchTreinoBundle({
+      today: {
+        date: today,
+        activeId: w.id,
+        concluido: false,
+        serieAtual: {},
+      },
+    });
     const supabase = createClient();
     const {
       data: { user },
@@ -418,9 +439,52 @@ export default function TreinoPage() {
     setPrs(newPrs);
     setLastLoads(newLast);
     patchTreinoBundle({ prs: newPrs, lastLoads: newLast });
-    setSerieAtual({ ...serieAtual, [ex.nome]: (serieAtual[ex.nome] ?? 0) + 1 });
+    const nextSeries = {
+      ...serieAtual,
+      [ex.nome]: (serieAtual[ex.nome] ?? 0) + 1,
+    };
+    setSerieAtual(nextSeries);
+    patchTreinoBundle({
+      today: {
+        date: today,
+        activeId,
+        concluido,
+        serieAtual: nextSeries,
+      },
+    });
     setInputs({ ...inputs, [ex.nome]: { carga: "", reps: "" } });
     setTimerKey(Date.now());
+  }
+
+  async function concluirSerieTempo(ex: ExerciseDef) {
+    const nextSeries = {
+      ...serieAtual,
+      [ex.nome]: (serieAtual[ex.nome] ?? 0) + 1,
+    };
+    setSerieAtual(nextSeries);
+    patchTreinoBundle({
+      today: {
+        date: today,
+        activeId,
+        concluido,
+        serieAtual: nextSeries,
+      },
+    });
+    setTimerKey(Date.now());
+
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    await supabase.from("exercise_logs").insert({
+      user_id: user.id,
+      date: today,
+      exercicio: ex.nome,
+      carga: 0,
+      reps: 1,
+    });
   }
 
   async function finalizarTreino() {
@@ -446,6 +510,14 @@ export default function TreinoPage() {
       });
     }
     setConcluido(true);
+    patchTreinoBundle({
+      today: {
+        date: today,
+        activeId: active.id,
+        concluido: true,
+        serieAtual,
+      },
+    });
     setTimerKey(null);
     invalidateDailyCache();
   }
@@ -789,19 +861,23 @@ export default function TreinoPage() {
               </div>
 
               {(() => {
-                const exDone = active.exercicios.filter(
-                  (ex) => (serieAtual[ex.nome] ?? 0) >= ex.series
-                ).length;
-                const exTotal = active.exercicios.length;
-                const pctSessao = exTotal
-                  ? Math.round((exDone / exTotal) * 100)
+                const { seriesDone, seriesTotal, exDone, exTotal } =
+                  sessaoProgress(active.exercicios, serieAtual);
+                const pctSessao = seriesTotal
+                  ? Math.round((seriesDone / seriesTotal) * 100)
                   : 0;
                 return (
                   <BentoCard variant="glass" className="!min-h-0 !py-3" span={2}>
                     <div className="mb-2 flex items-center justify-between text-xs">
                       <BentoLabel>Progresso da sessão</BentoLabel>
                       <span className="font-bold text-white/70">
-                        {exDone}/{exTotal} exercícios
+                        {seriesDone}/{seriesTotal} séries
+                        {exTotal > 0 && (
+                          <span className="text-white/40">
+                            {" "}
+                            · {exDone}/{exTotal} ok
+                          </span>
+                        )}
                       </span>
                     </div>
                     <RangeBar pct={pctSessao} color="white" />
@@ -858,13 +934,7 @@ export default function TreinoPage() {
                       <div className="mt-3 flex gap-2">
                         {isTimeBased ? (
                           <button
-                            onClick={() => {
-                              setSerieAtual({
-                                ...serieAtual,
-                                [ex.nome]: serie + 1,
-                              });
-                              setTimerKey(Date.now());
-                            }}
+                            onClick={() => concluirSerieTempo(ex)}
                             className="btn-primary flex-1 py-3"
                           >
                             {ex.reps_alvo} — concluir

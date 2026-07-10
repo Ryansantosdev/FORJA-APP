@@ -26,6 +26,9 @@ import LoadState from "@/components/LoadState";
 import BentoCard, { BentoLabel, BentoValue } from "@/components/BentoCard";
 import RangeBar from "@/components/RangeBar";
 import type { WeightPoint } from "@/components/ProgressoChart";
+import { calcDayChecklist, sumMacros } from "@/lib/nutrition";
+import { getScheduledWorkoutId } from "@/lib/schedule";
+import type { Meal } from "@/lib/types";
 
 const ProgressoChart = dynamic(() => import("@/components/ProgressoChart"), {
   ssr: false,
@@ -52,6 +55,11 @@ type ProgCache = {
   peso: string;
   pesoSalvo: boolean;
   diarioHistorico: { date: string; nota: string }[];
+  semanaResumo: {
+    diasCompletos: number;
+    mediaAguaL: number;
+    mediaProtG: number;
+  };
 };
 
 const PROG_KEY = "prog_payload";
@@ -72,6 +80,7 @@ function applyProgCache(c: ProgCache, setters: {
   setPeso: (v: string) => void;
   setPesoSalvo: (v: boolean) => void;
   setDiarioHistorico: (v: { date: string; nota: string }[]) => void;
+  setSemanaResumo: (v: ProgCache["semanaResumo"]) => void;
 }) {
   setters.setWeights(c.weights);
   setters.setMetaPeso(c.metaPeso);
@@ -84,6 +93,9 @@ function applyProgCache(c: ProgCache, setters: {
   setters.setPeso(c.peso);
   setters.setPesoSalvo(c.pesoSalvo);
   setters.setDiarioHistorico(c.diarioHistorico);
+  setters.setSemanaResumo(
+    c.semanaResumo ?? { diasCompletos: 0, mediaAguaL: 0, mediaProtG: 0 }
+  );
 }
 
 function movingAvg(
@@ -133,6 +145,11 @@ export default function ProgressoPage() {
   const [diarioHistorico, setDiarioHistorico] = useState<
     { date: string; nota: string }[]
   >([]);
+  const [semanaResumo, setSemanaResumo] = useState<ProgCache["semanaResumo"]>({
+    diasCompletos: 0,
+    mediaAguaL: 0,
+    mediaProtG: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const today = todayStr();
@@ -154,6 +171,7 @@ export default function ProgressoPage() {
         setPeso,
         setPesoSalvo,
         setDiarioHistorico,
+        setSemanaResumo,
       });
       setLoading(false);
       return;
@@ -183,13 +201,14 @@ export default function ProgressoPage() {
         dailyRes,
         weightTodayRes,
         weekNotesRes,
+        dailyWeekRes,
       ] = await Promise.all([
         supabase
           .from("weight_logs")
           .select("date, peso")
           .eq("user_id", user.id)
           .order("date"),
-        supabase.from("meals").select("id").eq("user_id", user.id),
+        supabase.from("meals").select("id, ordem, nome, icone, itens").eq("user_id", user.id),
         supabase
           .from("meal_logs")
           .select("date, meal_id")
@@ -202,7 +221,7 @@ export default function ProgressoPage() {
           .gte("date", d90),
         supabase
           .from("user_settings")
-          .select("meta_peso")
+          .select("meta_peso, meta_agua_ml, agenda_treino")
           .eq("user_id", user.id)
           .maybeSingle(),
         supabase
@@ -239,6 +258,11 @@ export default function ProgressoPage() {
           .eq("user_id", user.id)
           .gte("date", daysAgoStr(13))
           .not("nota", "is", null),
+        supabase
+          .from("daily_logs")
+          .select("date, agua_ml")
+          .eq("user_id", user.id)
+          .gte("date", d7),
       ]);
 
       const raw = (weightsRes.data ?? []).map((w) => ({
@@ -315,6 +339,49 @@ export default function ProgressoPage() {
         .sort((a, b) => b.date.localeCompare(a.date))
         .map((d) => ({ date: d.date, nota: d.nota! }));
 
+      const mealsList = (mealsRes.data as Meal[]) ?? [];
+      const metaAgua = settingsRes.data?.meta_agua_ml ?? 3000;
+      const agenda =
+        (settingsRes.data?.agenda_treino as Record<string, string | null>) ??
+        {};
+      const aguaByDay: Record<string, number> = {};
+      for (const row of dailyWeekRes.data ?? []) {
+        aguaByDay[row.date] = row.agua_ml ?? 0;
+      }
+      const logsByDay: Record<string, string[]> = {};
+      for (const log of mealLogsRes.data ?? []) {
+        if (!logsByDay[log.date]) logsByDay[log.date] = [];
+        logsByDay[log.date].push(log.meal_id);
+      }
+
+      let diasCompletos = 0;
+      let aguaSum = 0;
+      let protSum = 0;
+      for (let i = 0; i < 7; i++) {
+        const ds = daysAgoStr(i);
+        const doneIds = logsByDay[ds] ?? [];
+        const macros = sumMacros(mealsList, doneIds);
+        const aguaMl = aguaByDay[ds] ?? 0;
+        const dow = new Date(`${ds}T12:00:00`).getDay();
+        const schedId = getScheduledWorkoutId(agenda, dow);
+        const checklist = calcDayChecklist({
+          mealsCount: mealsList.length,
+          mealsDone: doneIds.length,
+          aguaMl,
+          metaAguaMl: metaAgua,
+          treinoDone: workoutByDay[ds] === true,
+          hasTreinoHoje: Boolean(schedId),
+        });
+        if (checklist.diaCompleto) diasCompletos++;
+        aguaSum += aguaMl;
+        protSum += macros.protDone;
+      }
+      const semanaResumoVal = {
+        diasCompletos,
+        mediaAguaL: Math.round((aguaSum / 7 / 1000) * 10) / 10,
+        mediaProtG: Math.round(protSum / 7),
+      };
+
       setWeights(chartData);
       setMetaPeso(settingsRes.data?.meta_peso ?? null);
       setVolumeSemana(vol);
@@ -326,6 +393,7 @@ export default function ProgressoPage() {
       setPeso(pesoVal);
       setPesoSalvo(pesoSalvoVal);
       setDiarioHistorico(diarioVal);
+      setSemanaResumo(semanaResumoVal);
 
       setCached(PROG_KEY, {
         weights: chartData,
@@ -339,6 +407,7 @@ export default function ProgressoPage() {
         peso: pesoVal,
         pesoSalvo: pesoSalvoVal,
         diarioHistorico: diarioVal,
+        semanaResumo: semanaResumoVal,
       });
     } catch {
       setLoadError("Não foi possível carregar o progresso. Tente de novo.");
@@ -362,6 +431,7 @@ export default function ProgressoPage() {
         setPeso,
         setPesoSalvo,
         setDiarioHistorico,
+        setSemanaResumo,
       });
       setLoading(false);
     }
@@ -578,6 +648,27 @@ export default function ProgressoPage() {
               </div>
             </div>
           </BentoCard>
+
+          <div className="bento-grid">
+            <BentoCard variant="mint" className="!min-h-0">
+              <BentoLabel>7 dias completos</BentoLabel>
+              <BentoValue sub="refeições + água + treino">
+                {semanaResumo.diasCompletos}/7
+              </BentoValue>
+            </BentoCard>
+            <BentoCard variant="blue" className="!min-h-0">
+              <BentoLabel>Água média</BentoLabel>
+              <BentoValue sub="por dia">
+                {semanaResumo.mediaAguaL}L
+              </BentoValue>
+            </BentoCard>
+            <BentoCard variant="amber" className="col-span-2 !min-h-0">
+              <BentoLabel>Proteína média</BentoLabel>
+              <BentoValue sub="refeições marcadas · por dia">
+                {semanaResumo.mediaProtG}g
+              </BentoValue>
+            </BentoCard>
+          </div>
 
           {/* PESO DE HOJE */}
           <BentoCard id="peso-hoje" variant="rose" className="!min-h-0 scroll-mt-4" span={2}>

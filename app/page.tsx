@@ -10,6 +10,8 @@ import {
   Quote,
   Trophy,
   ChevronRight,
+  RefreshCw,
+  Sparkles,
 } from "lucide-react";
 import { isRetroactiveWindow } from "@/lib/dates";
 import { ACHIEVEMENTS } from "@/lib/streak";
@@ -18,10 +20,16 @@ import { getScheduledWorkoutId, findWorkoutById } from "@/lib/schedule";
 import { getTreinoBundle } from "@/lib/treino-cache";
 import { aguasTomadas, totalAguas } from "@/lib/agua";
 import { formatLitersFromMl } from "@/lib/format";
+import {
+  calcDayChecklist,
+  sumMacros,
+  horarioSugeridoRefeicao,
+} from "@/lib/nutrition";
 import BentoCard, { BentoLabel, BentoValue } from "@/components/BentoCard";
 import RangeBar from "@/components/RangeBar";
 import ProgressRing from "@/components/ProgressRing";
-import { RefreshCw } from "lucide-react";
+import DayChecklist from "@/components/DayChecklist";
+import QuickWaterButton from "@/components/QuickWaterButton";
 import { SkeletonDashboard } from "@/components/Skeleton";
 import { useDailyData } from "@/components/DailyDataProvider";
 
@@ -51,52 +59,52 @@ export default function Dashboard() {
 
     const mealList = snapshot.meals;
     const doneIds = new Set(snapshot.mealDoneIds);
-    let kcalDone = 0;
-    let kcalTotal = 0;
-    for (const m of mealList) {
-      const kcal = m.itens.reduce((a, i) => a + (i.kcal || 0), 0);
-      kcalTotal += kcal;
-      if (doneIds.has(m.id)) kcalDone += kcal;
-    }
+    const macros = sumMacros(mealList, doneIds);
 
     const metaAgua = snapshot.settings.meta_agua_ml;
     const copoMl = snapshot.settings.copo_ml;
+    const metaProt = snapshot.settings.meta_proteina_g;
     const aguaMl = snapshot.aguaMl;
     const treinoDone = snapshot.workoutLog?.concluido ?? false;
     const treinoBundle = getTreinoBundle();
     const workouts = treinoBundle?.workouts ?? [];
-    const agenda =
-      treinoBundle?.agenda ?? snapshot.settings.agenda_treino;
+    const agenda = treinoBundle?.agenda ?? snapshot.settings.agenda_treino;
     const schedId = getScheduledWorkoutId(agenda);
     const sched = findWorkoutById(workouts, schedId);
-
-    const mealPct = mealList.length ? (doneIds.size / mealList.length) * 100 : 0;
-    const aguaPct = metaAgua ? Math.min(100, (aguaMl / metaAgua) * 100) : 0;
-    const treinoPct = treinoDone ? 100 : schedId ? 0 : 100;
     const hasTreinoHoje = !!schedId;
-    const pctDia = hasTreinoHoje
-      ? mealPct * 0.4 + aguaPct * 0.2 + treinoPct * 0.4
-      : mealPct * 0.5 + aguaPct * 0.5;
+
+    const checklist = calcDayChecklist({
+      mealsCount: mealList.length,
+      mealsDone: doneIds.size,
+      aguaMl,
+      metaAguaMl: metaAgua,
+      treinoDone,
+      hasTreinoHoje,
+    });
+
+    const nextMeal = mealList.find((m) => !doneIds.has(m.id)) ?? null;
 
     return {
       totalMeals: mealList.length,
       doneMeals: doneIds.size,
-      kcalDone,
-      kcalTotal,
+      ...macros,
+      metaProt,
       treinoDone,
       treinoNome: sched ? `${sched.letra} — ${sched.nome}` : null,
+      sched,
+      hasTreinoHoje,
       aguaMl,
       metaAgua,
       copoMl,
       focoMinSemana: snapshot.focusWeekMin,
-      pctDia,
-      sched,
-      nextMeal: mealList.find((m) => !doneIds.has(m.id)) ?? null,
+      checklist,
+      nextMeal,
+      nextMealHorario: nextMeal ? horarioSugeridoRefeicao(nextMeal.ordem) : null,
     };
   }, [snapshot]);
 
   const streak = snapshot?.streak;
-  const atRisk = hour >= 18 && (resumo?.pctDia ?? 0) < 100;
+  const atRisk = !!(hour >= 18 && resumo && !resumo.checklist.diaCompleto);
   const showSkeleton = !ready || (loading && !snapshot);
   const conquistas = ACHIEVEMENTS.filter((a) => (streak?.max ?? 0) >= a.dias);
 
@@ -138,24 +146,47 @@ export default function Dashboard() {
         </div>
       ) : resumo ? (
         <>
+          {resumo.checklist.diaCompleto && (
+            <BentoCard variant="mint" className="!min-h-0" span={2}>
+              <p className="flex items-center gap-2 text-sm font-semibold text-mint">
+                <Sparkles size={18} /> Dia completo
+              </p>
+              <p className="mt-1 text-xs text-white/55">
+                Refeições, água e treino ok. Mantenha a sequência amanhã.
+              </p>
+            </BentoCard>
+          )}
+
           <BentoCard
             variant="violet"
-            className="flex items-center gap-5 !min-h-0 py-5"
+            className="flex items-start gap-4 !min-h-0 py-5"
             span={2}
           >
-            <ProgressRing pct={resumo.pctDia} atRisk={atRisk} />
-            <div className="flex-1">
-              <BentoLabel>Dia fechado</BentoLabel>
+            <ProgressRing pct={resumo.checklist.pctDia} atRisk={atRisk} />
+            <div className="min-w-0 flex-1">
+              <BentoLabel>Sequência</BentoLabel>
               <p className={`bento-hero-value ${atRisk ? "text-amber" : ""}`}>
                 {streak?.current ?? 0}
               </p>
-              <p className="mt-1 text-sm text-white/50">
-                {atRisk
-                  ? "Streak em risco — feche o dia"
-                  : (streak?.current ?? 0) > 0
-                    ? `dias · recorde ${streak?.max}`
-                    : "Hoje você define o ritmo"}
+              <p className="text-xs text-white/45">
+                {Math.round(resumo.checklist.pctDia)}% do dia · recorde{" "}
+                {streak?.max ?? 0}
               </p>
+              <DayChecklist
+                checklist={resumo.checklist}
+                doneMeals={resumo.doneMeals}
+                totalMeals={resumo.totalMeals}
+                aguaMl={resumo.aguaMl}
+                metaAgua={resumo.metaAgua}
+                copoMl={resumo.copoMl}
+                treinoLabel={
+                  resumo.treinoDone
+                    ? "concluído"
+                    : resumo.sched
+                      ? resumo.sched.letra
+                      : null
+                }
+              />
               {conquistas.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">
                   {conquistas.map((c) => (
@@ -171,15 +202,38 @@ export default function Dashboard() {
             </div>
           </BentoCard>
 
+          {resumo.nextMeal && !resumo.checklist.diaCompleto && (
+            <BentoCard variant="amber" className="!min-h-0" span={2}>
+              <BentoLabel>Próxima refeição</BentoLabel>
+              <Link
+                href="/dieta"
+                className="btn-primary mt-2 flex items-center justify-between px-4 py-3.5 text-sm"
+              >
+                <span className="flex flex-col items-start gap-0.5">
+                  <span className="flex items-center gap-2 font-bold">
+                    <UtensilsCrossed size={16} />
+                    Marcar {resumo.nextMeal.nome}
+                  </span>
+                  {resumo.nextMealHorario && (
+                    <span className="text-[10px] font-normal opacity-70">
+                      Sugestão {resumo.nextMealHorario}
+                    </span>
+                  )}
+                </span>
+                <ChevronRight size={16} />
+              </Link>
+            </BentoCard>
+          )}
+
           {atRisk && (
             <BentoCard variant="amber" className="!min-h-0" span={2}>
               <BentoLabel>Streak em risco</BentoLabel>
               <p className="mb-3 text-sm text-white/70">
-                Falta pouco para fechar o dia — {Math.round(resumo.pctDia)}%
+                Faltam itens para fechar o dia — {Math.round(resumo.checklist.pctDia)}%
                 concluído.
               </p>
               <div className="flex flex-col gap-2">
-                {resumo.nextMeal && (
+                {!resumo.checklist.mealsOk && resumo.nextMeal && (
                   <Link
                     href="/dieta"
                     className="btn-primary flex items-center justify-between px-4 py-3 text-sm"
@@ -203,41 +257,14 @@ export default function Dashboard() {
                     <ChevronRight size={16} />
                   </Link>
                 )}
-                {resumo.aguaMl < resumo.metaAgua && (
-                  <Link
-                    href="/dieta"
-                    className="btn-ghost flex items-center justify-between border border-white/10 px-4 py-3 text-sm"
-                  >
-                    <span>Completar hidratação</span>
-                    <ChevronRight size={16} />
-                  </Link>
+                {!resumo.checklist.aguaOk && (
+                  <QuickWaterButton
+                    aguaMl={resumo.aguaMl}
+                    copoMl={resumo.copoMl}
+                  />
                 )}
               </div>
             </BentoCard>
-          )}
-
-          {(resumo.nextMeal || (resumo.sched && !resumo.treinoDone)) && (
-            <section className="card p-4">
-              <p className="section-label mb-3">Próxima ação</p>
-              {resumo.nextMeal && (
-                <Link href="/dieta" className="flex items-center justify-between py-2">
-                  <span className="flex items-center gap-2">
-                    <UtensilsCrossed size={18} className="text-primary" />
-                    Marcar {resumo.nextMeal.nome}
-                  </span>
-                  <ChevronRight size={16} className="text-muted" />
-                </Link>
-              )}
-              {resumo.sched && !resumo.treinoDone && (
-                <Link href="/treino" className="flex items-center justify-between py-2">
-                  <span className="flex items-center gap-2">
-                    <Dumbbell size={18} className="text-primary" />
-                    Iniciar {resumo.sched.letra} — {resumo.sched.nome}
-                  </span>
-                  <ChevronRight size={16} className="text-muted" />
-                </Link>
-              )}
-            </section>
           )}
 
           <section className="card p-4">
@@ -264,6 +291,22 @@ export default function Dashboard() {
                 </BentoValue>
               </BentoCard>
             </Link>
+            <Link href="/dieta" className="block">
+              <BentoCard variant="mint" className="h-full transition-transform active:scale-[0.98]">
+                <BentoLabel>Proteína</BentoLabel>
+                <BentoValue sub={`meta ${resumo.metaProt}g`}>
+                  {resumo.protDone}g
+                </BentoValue>
+                <RangeBar
+                  pct={
+                    resumo.metaProt
+                      ? Math.min(100, Math.round((resumo.protDone / resumo.metaProt) * 100))
+                      : 0
+                  }
+                  color="mint"
+                />
+              </BentoCard>
+            </Link>
             <Link href="/treino" className="block">
               <BentoCard variant="rose" className="h-full transition-transform active:scale-[0.98]">
                 <BentoLabel>Treino</BentoLabel>
@@ -280,26 +323,36 @@ export default function Dashboard() {
                 </BentoValue>
               </BentoCard>
             </Link>
-            <Link href="/dieta" className="block">
-              <BentoCard variant="blue" className="h-full transition-transform active:scale-[0.98]">
-                <BentoLabel>Água</BentoLabel>
-                <BentoValue sub={formatLitersFromMl(resumo.aguaMl)}>
-                  {aguasTomadas(resumo.aguaMl, resumo.copoMl)}/
-                  {totalAguas(resumo.metaAgua, resumo.copoMl)}
-                </BentoValue>
-                <RangeBar
-                  pct={
-                    resumo.metaAgua
-                      ? Math.min(
-                          100,
-                          Math.round((resumo.aguaMl / resumo.metaAgua) * 100)
-                        )
-                      : 0
-                  }
-                />
+            <div className="block">
+              <BentoCard variant="blue" className="h-full">
+                <Link href="/dieta" className="block transition-transform active:scale-[0.98]">
+                  <BentoLabel>Água</BentoLabel>
+                  <BentoValue sub={formatLitersFromMl(resumo.aguaMl)}>
+                    {aguasTomadas(resumo.aguaMl, resumo.copoMl)}/
+                    {totalAguas(resumo.metaAgua, resumo.copoMl)}
+                  </BentoValue>
+                  <RangeBar
+                    pct={
+                      resumo.metaAgua
+                        ? Math.min(
+                            100,
+                            Math.round((resumo.aguaMl / resumo.metaAgua) * 100)
+                          )
+                        : 0
+                    }
+                  />
+                </Link>
+                {!resumo.checklist.aguaOk && (
+                  <div className="mt-2">
+                    <QuickWaterButton
+                      aguaMl={resumo.aguaMl}
+                      copoMl={resumo.copoMl}
+                    />
+                  </div>
+                )}
               </BentoCard>
-            </Link>
-            <Link href="/motivacao" className="block">
+            </div>
+            <Link href="/motivacao" className="col-span-2 block">
               <BentoCard variant="slate" className="h-full transition-transform active:scale-[0.98]">
                 <BentoLabel>Foco</BentoLabel>
                 <BentoValue sub="últimos 7 dias">
