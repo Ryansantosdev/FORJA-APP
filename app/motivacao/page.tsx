@@ -1,74 +1,64 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Flame, Quote, Play, Square, CheckCircle2, Brain } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { todayStr, daysAgoStr, formatShort } from "@/lib/dates";
 import { showToast } from "@/lib/toast";
 import BentoCard, { BentoLabel, BentoValue } from "@/components/BentoCard";
+import { SkeletonMente } from "@/components/Skeleton";
+import { useDailyData, invalidateDailyCache } from "@/components/DailyDataProvider";
 import {
   drawInsight,
   contextualInsight,
   CATEGORIAS,
   type Categoria,
   type Insight,
-  type DayContext,
 } from "@/lib/insights";
 
 const DEEP_WORK_MIN = 50;
 
 export default function MentePage() {
+  const { snapshot, loading } = useDailyData();
   const [insight, setInsight] = useState<Insight | null>(null);
   const [contextual, setContextual] = useState<Insight | null>(null);
   const [categoria, setCategoria] = useState<Categoria | undefined>();
-  const [focoSemana, setFocoSemana] = useState<
-    { date: string; minutos: number }[]
-  >([]);
 
   useEffect(() => {
-    (async () => {
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const today = todayStr();
-      const hour = new Date().getHours();
-      const [workout, stats, meals, mealLogs, focusRes] = await Promise.all([
-        supabase.from("workout_logs").select("concluido").eq("user_id", user.id).eq("date", today).maybeSingle(),
-        supabase.from("user_stats").select("current_streak").eq("user_id", user.id).maybeSingle(),
-        supabase.from("meals").select("id").eq("user_id", user.id),
-        supabase.from("meal_logs").select("meal_id").eq("user_id", user.id).eq("date", today),
-        supabase.from("focus_logs").select("date, minutos").eq("user_id", user.id).gte("date", daysAgoStr(6)),
-      ]);
-      const total = meals.data?.length ?? 0;
-      const done = mealLogs.data?.length ?? 0;
-      const treinoDone = workout.data?.concluido ?? false;
-      const ctx: DayContext = {
+    if (!snapshot) return;
+    const hour = new Date().getHours();
+    const total = snapshot.meals.length;
+    const done = snapshot.mealDoneIds.length;
+    const treinoDone = snapshot.workoutLog?.concluido ?? false;
+    setContextual(
+      contextualInsight({
         hour,
         treinoDone,
         treinoPendente: !treinoDone && hour >= 17,
-        streak: stats.data?.current_streak ?? 0,
+        streak: snapshot.streak.current,
         diaIncompleto: done < total || !treinoDone,
-      };
-      setContextual(contextualInsight(ctx));
+      })
+    );
+  }, [snapshot]);
 
-      const byDay: Record<string, number> = {};
-      for (const f of focusRes.data ?? []) {
-        byDay[f.date] = (byDay[f.date] ?? 0) + f.minutos;
-      }
-      const semana = Array.from({ length: 7 }, (_, i) => {
-        const d = daysAgoStr(6 - i);
-        return { date: d, minutos: byDay[d] ?? 0 };
-      });
-      setFocoSemana(semana);
-    })();
-  }, []);
+  const focoSemana = useMemo(() => {
+    if (!snapshot) return [];
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = daysAgoStr(6 - i);
+      return { date: d, minutos: snapshot.focusByDay[d] ?? 0 };
+    });
+  }, [snapshot]);
 
   const totalSemana = focoSemana.reduce((a, d) => a + d.minutos, 0);
-  const blocosSemana = focoSemana.filter((d) => d.minutos >= DEEP_WORK_MIN).length;
+  const blocosSemana = focoSemana.filter(
+    (d) => d.minutos >= DEEP_WORK_MIN
+  ).length;
+
+  const showSkeleton = loading && !snapshot;
 
   return (
     <div className="space-y-4">
-      <header className="animate-fade-up pt-1">
+      <header className="page-header pt-1">
         <p className="section-label">Foco mental</p>
         <h1 className="text-2xl font-extrabold tracking-tight">Mente</h1>
         <p className="mt-0.5 text-xs text-white/45">
@@ -76,131 +66,152 @@ export default function MentePage() {
         </p>
       </header>
 
-      {contextual && (
-        <BentoCard variant="violet" className="!min-h-0">
-          <BentoLabel>Para agora</BentoLabel>
-          <p className="text-sm leading-relaxed">{contextual.t}</p>
-          <p className="mt-1 text-xs text-white/45">{contextual.a}</p>
-        </BentoCard>
-      )}
+      {showSkeleton ? (
+        <SkeletonMente />
+      ) : (
+        <>
+          {contextual && (
+            <BentoCard variant="violet" className="!min-h-0">
+              <BentoLabel>Para agora</BentoLabel>
+              <p className="text-sm leading-relaxed">{contextual.t}</p>
+              <p className="mt-1 text-xs text-white/45">{contextual.a}</p>
+            </BentoCard>
+          )}
 
-      <BentoCard variant="slate" className="!min-h-0" span={2}>
-        <div className="mb-3 flex items-center gap-2">
-          <Brain size={14} className="text-white/50" />
-          <BentoLabel>Foco esta semana</BentoLabel>
-        </div>
-        <BentoValue
-          sub={`${blocosSemana} blocos de ${DEEP_WORK_MIN} min`}
-        >
-          {Math.floor(totalSemana / 60)}h
-          {String(totalSemana % 60).padStart(2, "0")}
-        </BentoValue>
-        <div className="mt-3 flex justify-between gap-1">
-          {focoSemana.map((d) => {
-            const pct = Math.min(100, Math.round((d.minutos / DEEP_WORK_MIN) * 100));
-            return (
-              <div key={d.date} className="flex flex-1 flex-col items-center gap-1">
-                <div
-                  className="w-full overflow-hidden rounded-full bg-white/[0.06]"
-                  style={{ height: 40 }}
-                >
+          <BentoCard variant="slate" className="!min-h-0" span={2}>
+            <div className="mb-3 flex items-center gap-2">
+              <Brain size={14} className="text-white/50" />
+              <BentoLabel>Foco esta semana</BentoLabel>
+            </div>
+            <BentoValue sub={`${blocosSemana} blocos de ${DEEP_WORK_MIN} min`}>
+              {Math.floor(totalSemana / 60)}h
+              {String(totalSemana % 60).padStart(2, "0")}
+            </BentoValue>
+            <div className="mt-3 flex justify-between gap-1">
+              {focoSemana.map((d) => {
+                const pct = Math.min(
+                  100,
+                  Math.round((d.minutos / DEEP_WORK_MIN) * 100)
+                );
+                return (
                   <div
-                    className="w-full rounded-full bg-primary transition-all"
-                    style={{
-                      height: `${Math.max(4, pct)}%`,
-                      marginTop: `${100 - Math.max(4, pct)}%`,
-                    }}
-                  />
-                </div>
-                <span className="text-[9px] text-white/35">
-                  {formatShort(d.date).slice(0, 5)}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </BentoCard>
+                    key={d.date}
+                    className="flex flex-1 flex-col items-center gap-1"
+                  >
+                    <div
+                      className="w-full overflow-hidden rounded-full bg-white/[0.06]"
+                      style={{ height: 40 }}
+                    >
+                      <div
+                        className="w-full rounded-full bg-primary transition-[height,margin] duration-300"
+                        style={{
+                          height: `${Math.max(4, pct)}%`,
+                          marginTop: `${100 - Math.max(4, pct)}%`,
+                        }}
+                      />
+                    </div>
+                    <span className="text-[9px] text-white/35">
+                      {formatShort(d.date).slice(0, 5)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </BentoCard>
 
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        <button
-          onClick={() => setCategoria(undefined)}
-          className={`btn-ghost shrink-0 rounded-full px-3 py-1.5 text-xs ${
-            !categoria ? "text-primary" : ""
-          }`}
-        >
-          Todas
-        </button>
-        {CATEGORIAS.map((c) => (
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            <button
+              onClick={() => setCategoria(undefined)}
+              className={`btn-ghost shrink-0 rounded-full px-3 py-1.5 text-xs ${
+                !categoria ? "text-primary" : ""
+              }`}
+            >
+              Todas
+            </button>
+            {CATEGORIAS.map((c) => (
+              <button
+                key={c}
+                onClick={() => setCategoria(c)}
+                className={`btn-ghost shrink-0 rounded-full px-3 py-1.5 text-xs ${
+                  categoria === c ? "text-primary" : ""
+                }`}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+
+          <BentoCard variant="slate" className="p-6">
+            {insight ? (
+              <>
+                <Quote size={22} className="mb-3 text-amber" />
+                <p className="text-lg font-medium leading-relaxed">{insight.t}</p>
+                <p className="mt-3 text-sm text-muted">
+                  {insight.a} · {insight.c}
+                </p>
+              </>
+            ) : (
+              <p className="py-4 text-center text-sm text-muted">
+                A mente que você não forja de manhã te sabota à noite.
+              </p>
+            )}
+          </BentoCard>
+
           <button
-            key={c}
-            onClick={() => setCategoria(c)}
-            className={`btn-ghost shrink-0 rounded-full px-3 py-1.5 text-xs ${
-              categoria === c ? "text-primary" : ""
-            }`}
+            onClick={() => setInsight(drawInsight(categoria))}
+            className="btn-primary flex w-full items-center justify-center gap-2 py-4"
           >
-            {c}
+            <Flame size={20} /> Forjar Mente
           </button>
-        ))}
-      </div>
 
-      <BentoCard variant="slate" className="p-6">
-        {insight ? (
-          <>
-            <Quote size={22} className="mb-3 text-amber" />
-            <p className="text-lg font-medium leading-relaxed">{insight.t}</p>
-            <p className="mt-3 text-sm text-muted">{insight.a} · {insight.c}</p>
-          </>
-        ) : (
-          <p className="py-4 text-center text-sm text-muted">A mente que você não forja de manhã te sabota à noite.</p>
-        )}
-      </BentoCard>
-
-      <button onClick={() => setInsight(drawInsight(categoria))} className="btn-primary flex w-full items-center justify-center gap-2 py-4">
-        <Flame size={20} /> Forjar Mente
-      </button>
-
-      <DeepWork />
+          <DeepWork focusTodayMin={snapshot?.focusByDay[todayStr()] ?? 0} />
+        </>
+      )}
     </div>
   );
 }
 
-function DeepWork() {
+function DeepWork({ focusTodayMin }: { focusTodayMin: number }) {
   const [running, setRunning] = useState(false);
   const [left, setLeft] = useState(DEEP_WORK_MIN * 60);
-  const [doneToday, setDoneToday] = useState(0);
+  const [doneToday, setDoneToday] = useState(focusTodayMin);
   const [sessionDone, setSessionDone] = useState(false);
   const interval = useRef<ReturnType<typeof setInterval> | null>(null);
   const startedAt = useRef<number | null>(null);
 
   useEffect(() => {
-    (async () => {
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data } = await supabase.from("focus_logs").select("minutos").eq("user_id", user.id).eq("date", todayStr());
-      setDoneToday(data?.reduce((a, f) => a + f.minutos, 0) ?? 0);
-    })();
-    return () => { if (interval.current) clearInterval(interval.current); };
-  }, []);
+    setDoneToday(focusTodayMin);
+  }, [focusTodayMin]);
 
   async function salvarSessao(minutos: number) {
     if (minutos < 1) return;
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase.from("focus_logs").insert({ user_id: user.id, date: todayStr(), minutos });
+    await supabase.from("focus_logs").insert({
+      user_id: user.id,
+      date: todayStr(),
+      minutos,
+    });
     setDoneToday((d) => d + minutos);
+    invalidateDailyCache();
     showToast(`${minutos} min de foco salvos ✓`);
   }
 
   function start() {
-    setRunning(true); setSessionDone(false); setLeft(DEEP_WORK_MIN * 60);
+    setRunning(true);
+    setSessionDone(false);
+    setLeft(DEEP_WORK_MIN * 60);
     startedAt.current = Date.now();
     interval.current = setInterval(() => {
       setLeft((prev) => {
         if (prev <= 1) {
           if (interval.current) clearInterval(interval.current);
-          setRunning(false); setSessionDone(true); salvarSessao(DEEP_WORK_MIN);
+          setRunning(false);
+          setSessionDone(true);
+          salvarSessao(DEEP_WORK_MIN);
           navigator.vibrate?.([300, 150, 300]);
           return 0;
         }
@@ -212,7 +223,9 @@ function DeepWork() {
   function stop() {
     if (interval.current) clearInterval(interval.current);
     setRunning(false);
-    const mins = startedAt.current ? Math.floor((Date.now() - startedAt.current) / 60000) : 0;
+    const mins = startedAt.current
+      ? Math.floor((Date.now() - startedAt.current) / 60000)
+      : 0;
     salvarSessao(mins);
     setLeft(DEEP_WORK_MIN * 60);
   }

@@ -4,7 +4,25 @@ import { todayStr, daysAgoStr } from "./dates";
 /** Até esta hora do dia seguinte ainda dá para fechar o dia anterior (registro retroativo). */
 export const GRACE_HOUR = 9;
 
-/** Um dia está 100% quando todas as refeições + treino (se houver na agenda) foram marcados. */
+export type DaySnapshot = {
+  mealsCount: number;
+  mealDoneCount: number;
+  workoutDone: boolean;
+  agenda: Record<string, string | null>;
+};
+
+export function isDayCompleteFromSnapshot(
+  date: string,
+  snap: DaySnapshot
+): boolean {
+  const d = new Date(date + "T12:00:00");
+  const dow = String(d.getDay());
+  const treinoAgendado = Boolean(snap.agenda[dow]);
+  const treinoOk = !treinoAgendado || snap.workoutDone;
+  return snap.mealsCount > 0 && snap.mealDoneCount >= snap.mealsCount && treinoOk;
+}
+
+/** Versão com queries — usada quando não há snapshot pré-carregado. */
 export async function isDayComplete(
   supabase: SupabaseClient,
   userId: string,
@@ -30,44 +48,39 @@ export async function isDayComplete(
       .maybeSingle(),
   ]);
 
-  const totalMeals = mealsRes.data?.length ?? 0;
-  const doneMeals = logsRes.data?.length ?? 0;
-  const d = new Date(date + "T12:00:00");
-  const dow = String(d.getDay());
-  const agenda = (settingsRes.data?.agenda_treino as Record<string, string | null>) ?? {};
-  const treinoAgendado = Boolean(agenda[dow]);
-  const workoutDone = workoutRes.data?.concluido === true;
-  const treinoOk = !treinoAgendado || workoutDone;
-
-  return totalMeals > 0 && doneMeals >= totalMeals && treinoOk;
+  const agenda =
+    (settingsRes.data?.agenda_treino as Record<string, string | null>) ?? {};
+  return isDayCompleteFromSnapshot(date, {
+    mealsCount: mealsRes.data?.length ?? 0,
+    mealDoneCount: logsRes.data?.length ?? 0,
+    workoutDone: workoutRes.data?.concluido === true,
+    agenda,
+  });
 }
 
-/**
- * "Modo Goggins" com janela de tolerância:
- * - Dia 100% → streak conta.
- * - Ontem incompleto ainda pode ser fechado até as 9h de hoje (retroativo).
- * - Depois da janela, dia incompleto = streak zera.
- */
-export async function syncStreak(
+type StatsRow = {
+  current_streak: number;
+  max_streak: number;
+  last_completed_date: string | null;
+};
+
+/** Streak usando dados já buscados — evita queries duplicadas no dashboard. */
+export async function syncStreakFromSnapshot(
   supabase: SupabaseClient,
-  userId: string
+  userId: string,
+  todaySnap: DaySnapshot & { stats: StatsRow | null }
 ): Promise<{ current: number; max: number }> {
   const today = todayStr();
   const yesterday = daysAgoStr(1);
   const dayBefore = daysAgoStr(2);
   const inGrace = new Date().getHours() < GRACE_HOUR;
 
-  const { data: stats } = await supabase
-    .from("user_stats")
-    .select("current_streak, max_streak, last_completed_date")
-    .eq("user_id", userId)
-    .maybeSingle();
+  let current = todaySnap.stats?.current_streak ?? 0;
+  let max = todaySnap.stats?.max_streak ?? 0;
+  let lastDone = todaySnap.stats?.last_completed_date ?? null;
 
-  let current = stats?.current_streak ?? 0;
-  let max = stats?.max_streak ?? 0;
-  let lastDone = stats?.last_completed_date ?? null;
+  const todayComplete = isDayCompleteFromSnapshot(today, todaySnap);
 
-  // 1) fechamento retroativo de ontem (dentro da janela de tolerância)
   if (lastDone !== yesterday && lastDone !== today && inGrace) {
     const ydayComplete = await isDayComplete(supabase, userId, yesterday);
     if (ydayComplete) {
@@ -83,9 +96,6 @@ export async function syncStreak(
     }
   }
 
-  // 2) dia de hoje
-  const todayComplete = await isDayComplete(supabase, userId, today);
-
   if (todayComplete && lastDone !== today) {
     current = lastDone === yesterday ? current + 1 : 1;
     max = Math.max(max, current);
@@ -97,7 +107,6 @@ export async function syncStreak(
       last_completed_date: lastDone,
     });
   } else if (!todayComplete && lastDone !== today && lastDone !== yesterday) {
-    // fora da janela de tolerância e a corrente quebrou → zera
     const stillProtected = inGrace && lastDone === dayBefore;
     if (!stillProtected && current !== 0) {
       current = 0;
@@ -111,6 +120,52 @@ export async function syncStreak(
   }
 
   return { current, max };
+}
+
+/**
+ * "Modo Goggins" com janela de tolerância — fallback sem snapshot.
+ */
+export async function syncStreak(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<{ current: number; max: number }> {
+  const today = todayStr();
+  const [mealsRes, logsRes, workoutRes, settingsRes, statsRes] =
+    await Promise.all([
+      supabase.from("meals").select("id").eq("user_id", userId),
+      supabase
+        .from("meal_logs")
+        .select("meal_id")
+        .eq("user_id", userId)
+        .eq("date", today),
+      supabase
+        .from("workout_logs")
+        .select("concluido")
+        .eq("user_id", userId)
+        .eq("date", today)
+        .maybeSingle(),
+      supabase
+        .from("user_settings")
+        .select("agenda_treino")
+        .eq("user_id", userId)
+        .maybeSingle(),
+      supabase
+        .from("user_stats")
+        .select("current_streak, max_streak, last_completed_date")
+        .eq("user_id", userId)
+        .maybeSingle(),
+    ]);
+
+  const agenda =
+    (settingsRes.data?.agenda_treino as Record<string, string | null>) ?? {};
+
+  return syncStreakFromSnapshot(supabase, userId, {
+    mealsCount: mealsRes.data?.length ?? 0,
+    mealDoneCount: logsRes.data?.length ?? 0,
+    workoutDone: workoutRes.data?.concluido === true,
+    agenda,
+    stats: statsRes.data ?? null,
+  });
 }
 
 export const ACHIEVEMENTS = [

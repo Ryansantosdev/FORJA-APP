@@ -7,11 +7,19 @@ import {
   STATIC_DATA_TTL,
 } from "./cache";
 
+export type TreinoTodayState = {
+  date: string;
+  activeId: string | null;
+  concluido: boolean;
+  serieAtual: Record<string, number>;
+};
+
 export type TreinoBundle = {
   workouts: Workout[];
   agenda: Record<string, string | null>;
   lastLoads: Record<string, { carga: number; reps: number }>;
   prs: Record<string, number>;
+  today?: TreinoTodayState;
 };
 
 export const TREINO_BUNDLE_KEY = "treino_bundle";

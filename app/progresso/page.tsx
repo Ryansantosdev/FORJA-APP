@@ -13,7 +13,14 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { todayStr, daysAgoStr, formatShort, toDateStr } from "@/lib/dates";
-import { getCached, setCached } from "@/lib/cache";
+import {
+  getCached,
+  setCached,
+  getCachedEntry,
+  isCacheFresh,
+  PROG_TTL,
+  invalidateCache,
+} from "@/lib/cache";
 import { showToast } from "@/lib/toast";
 import LoadState from "@/components/LoadState";
 import BentoCard, { BentoLabel, BentoValue } from "@/components/BentoCard";
@@ -26,6 +33,58 @@ const ProgressoChart = dynamic(() => import("@/components/ProgressoChart"), {
 });
 
 type DayStatus = "full" | "partial" | "none";
+
+type ProgCache = {
+  weights: WeightPoint[];
+  metaPeso: number | null;
+  heatmap: Record<string, DayStatus>;
+  adesao: {
+    dieta: number;
+    treino: number;
+    dietaDone: number;
+    dietaTotal: number;
+    treinoDone: number;
+  };
+  volumeSemana: number;
+  streak: { current: number; max: number };
+  topPr: { nome: string; carga: number } | null;
+  nota: string;
+  peso: string;
+  pesoSalvo: boolean;
+  diarioHistorico: { date: string; nota: string }[];
+};
+
+const PROG_KEY = "prog_payload";
+
+function readProgCache(): ProgCache | null {
+  return getCached<ProgCache>(PROG_KEY);
+}
+
+function applyProgCache(c: ProgCache, setters: {
+  setWeights: (v: WeightPoint[]) => void;
+  setMetaPeso: (v: number | null) => void;
+  setHeatmap: (v: Record<string, DayStatus>) => void;
+  setAdesao: (v: ProgCache["adesao"]) => void;
+  setVolumeSemana: (v: number) => void;
+  setStreak: (v: { current: number; max: number }) => void;
+  setTopPr: (v: { nome: string; carga: number } | null) => void;
+  setNota: (v: string) => void;
+  setPeso: (v: string) => void;
+  setPesoSalvo: (v: boolean) => void;
+  setDiarioHistorico: (v: { date: string; nota: string }[]) => void;
+}) {
+  setters.setWeights(c.weights);
+  setters.setMetaPeso(c.metaPeso);
+  setters.setHeatmap(c.heatmap);
+  setters.setAdesao(c.adesao);
+  setters.setVolumeSemana(c.volumeSemana);
+  setters.setStreak(c.streak);
+  setters.setTopPr(c.topPr);
+  setters.setNota(c.nota);
+  setters.setPeso(c.peso);
+  setters.setPesoSalvo(c.pesoSalvo);
+  setters.setDiarioHistorico(c.diarioHistorico);
+}
 
 function movingAvg(
   weights: { date: string; peso: number }[],
@@ -78,9 +137,29 @@ export default function ProgressoPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const today = todayStr();
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     setLoadError(null);
-    const hadCache = Boolean(getCached("prog_data"));
+
+    const entry = getCachedEntry<ProgCache>(PROG_KEY);
+    if (!force && isCacheFresh(entry, PROG_TTL) && entry?.data) {
+      applyProgCache(entry.data, {
+        setWeights,
+        setMetaPeso,
+        setHeatmap,
+        setAdesao,
+        setVolumeSemana,
+        setStreak,
+        setTopPr,
+        setNota,
+        setPeso,
+        setPesoSalvo,
+        setDiarioHistorico,
+      });
+      setLoading(false);
+      return;
+    }
+
+    const hadCache = Boolean(readProgCache());
     if (!hadCache) setLoading(true);
 
     try {
@@ -170,27 +249,16 @@ export default function ProgressoPage() {
         ...w,
         media7: movingAvg(raw, i),
       }));
-      setWeights(chartData);
-      setMetaPeso(settingsRes.data?.meta_peso ?? null);
 
       const vol = (exRes.data ?? []).reduce(
         (a, e) => a + Number(e.carga) * e.reps,
         0
       );
-      setVolumeSemana(vol);
-
-      setStreak({
-        current: statsRes.data?.current_streak ?? 0,
-        max: statsRes.data?.max_streak ?? 0,
-      });
 
       const prRow = allExRes.data?.[0];
-      if (prRow) {
-        setTopPr({
-          nome: prRow.exercicio,
-          carga: Number(prRow.carga),
-        });
-      }
+      const topPrVal = prRow
+        ? { nome: prRow.exercicio, carga: Number(prRow.carga) }
+        : null;
 
       const totalMeals = mealsRes.data?.length ?? 0;
       const mealsByDay: Record<string, number> = {};
@@ -215,7 +283,6 @@ export default function ProgressoPage() {
               ? "partial"
               : "none";
       }
-      setHeatmap(map);
 
       let dietaDone = 0,
         treinoDone = 0;
@@ -225,33 +292,77 @@ export default function ProgressoPage() {
         if (workoutByDay[ds]) treinoDone++;
       }
       const dietaTotal = totalMeals * 7;
-      setAdesao({
+      const adesaoVal = {
         dieta: dietaTotal > 0 ? Math.round((dietaDone / dietaTotal) * 100) : 0,
         treino: Math.round((treinoDone / 7) * 100),
         dietaDone,
         dietaTotal,
         treinoDone,
+      };
+
+      const streakVal = {
+        current: statsRes.data?.current_streak ?? 0,
+        max: statsRes.data?.max_streak ?? 0,
+      };
+
+      const notaVal = dailyRes.data?.nota ?? "";
+      const pesoVal = weightTodayRes.data?.peso
+        ? String(weightTodayRes.data.peso)
+        : "";
+      const pesoSalvoVal = Boolean(weightTodayRes.data?.peso);
+      const diarioVal = (weekNotesRes.data ?? [])
+        .filter((d) => d.nota?.trim())
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .map((d) => ({ date: d.date, nota: d.nota! }));
+
+      setWeights(chartData);
+      setMetaPeso(settingsRes.data?.meta_peso ?? null);
+      setVolumeSemana(vol);
+      setStreak(streakVal);
+      setTopPr(topPrVal);
+      setHeatmap(map);
+      setAdesao(adesaoVal);
+      setNota(notaVal);
+      setPeso(pesoVal);
+      setPesoSalvo(pesoSalvoVal);
+      setDiarioHistorico(diarioVal);
+
+      setCached(PROG_KEY, {
+        weights: chartData,
+        metaPeso: settingsRes.data?.meta_peso ?? null,
+        heatmap: map,
+        adesao: adesaoVal,
+        volumeSemana: vol,
+        streak: streakVal,
+        topPr: topPrVal,
+        nota: notaVal,
+        peso: pesoVal,
+        pesoSalvo: pesoSalvoVal,
+        diarioHistorico: diarioVal,
       });
-
-      setNota(dailyRes.data?.nota ?? "");
-      if (weightTodayRes.data?.peso) {
-        setPeso(String(weightTodayRes.data.peso));
-        setPesoSalvo(true);
-      } else {
-        setPeso("");
-        setPesoSalvo(false);
-      }
-      setDiarioHistorico(
-        (weekNotesRes.data ?? [])
-          .filter((d) => d.nota?.trim())
-          .sort((a, b) => b.date.localeCompare(a.date))
-          .map((d) => ({ date: d.date, nota: d.nota! }))
-      );
-
-      setCached("prog_data", true);
     } catch {
       setLoadError("Não foi possível carregar o progresso. Tente de novo.");
     } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const c = readProgCache();
+    if (c) {
+      applyProgCache(c, {
+        setWeights,
+        setMetaPeso,
+        setHeatmap,
+        setAdesao,
+        setVolumeSemana,
+        setStreak,
+        setTopPr,
+        setNota,
+        setPeso,
+        setPesoSalvo,
+        setDiarioHistorico,
+      });
       setLoading(false);
     }
   }, []);
@@ -290,6 +401,7 @@ export default function ProgressoPage() {
       return rebuildChartData(raw);
     });
     setPesoSalvo(true);
+    invalidateCache(PROG_KEY);
     showToast("Peso salvo ✓");
   }
 
@@ -306,6 +418,7 @@ export default function ProgressoPage() {
     setNotaSalva(true);
     setTimeout(() => setNotaSalva(false), 2000);
     showToast("Diário salvo ✓");
+    invalidateCache(PROG_KEY);
     if (nota.trim()) {
       setDiarioHistorico((prev) => {
         const rest = prev.filter((d) => d.date !== today);
@@ -421,7 +534,7 @@ export default function ProgressoPage() {
 
   return (
     <div className="space-y-5 pb-2">
-      <header className="animate-fade-up flex items-start justify-between pt-1">
+      <header className="page-header flex items-start justify-between pt-1">
         <div>
           <p className="section-label">Sua jornada</p>
           <h1 className="text-2xl font-extrabold tracking-tight">
@@ -437,7 +550,12 @@ export default function ProgressoPage() {
         </button>
       </header>
 
-      <LoadState loading={loading} error={loadError} onRetry={() => load()}>
+      <LoadState
+        loading={loading}
+        error={loadError}
+        onRetry={() => load(true)}
+        skeleton="progresso"
+      >
         <>
           {/* HERO — streak */}
           <BentoCard variant="violet" className="!min-h-0 py-6" span={2}>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import {
   Check,
   Dumbbell,
@@ -23,6 +23,7 @@ import {
   getCachedEntry,
   isCacheFresh,
 } from "@/lib/cache";
+import { useDailyData, invalidateDailyCache } from "@/components/DailyDataProvider";
 import {
   getTreinoBundle,
   saveTreinoBundle,
@@ -52,28 +53,22 @@ function migrationUserMessage(code: string): string {
 }
 
 export default function TreinoPage() {
-  const initialBundle = getTreinoBundle();
-  const [workouts, setWorkouts] = useState<Workout[]>(
-    () => initialBundle?.workouts ?? []
-  );
-  const [agenda, setAgenda] = useState<Record<string, string | null>>(
-    () => initialBundle?.agenda ?? {}
-  );
+  const { snapshot } = useDailyData();
+  const [workouts, setWorkouts] = useState<Workout[]>([]);
+  const [agenda, setAgenda] = useState<Record<string, string | null>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
   const [concluido, setConcluido] = useState(false);
   const [serieAtual, setSerieAtual] = useState<SerieState>({});
   const [lastLoads, setLastLoads] = useState<
     Record<string, { carga: number; reps: number }>
-  >(() => initialBundle?.lastLoads ?? {});
-  const [prs, setPrs] = useState<Record<string, number>>(
-    () => initialBundle?.prs ?? {}
-  );
+  >({});
+  const [prs, setPrs] = useState<Record<string, number>>({});
   const [inputs, setInputs] = useState<
     Record<string, { carga: string; reps: string }>
   >({});
   const [newPr, setNewPr] = useState<string | null>(null);
   const [timerKey, setTimerKey] = useState<number | null>(null);
-  const [loading, setLoading] = useState(!initialBundle?.workouts.length);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
   const [importingId, setImportingId] = useState<string | null>(null);
@@ -97,31 +92,43 @@ export default function TreinoPage() {
         tipo_treino?: string;
         concluido?: boolean;
       } | null,
-      exToday: { exercicio: string }[]
+      exToday: { exercicio: string }[],
+      persist = true
     ) => {
       const schedId = getScheduledWorkoutId(ag);
       let nextActive: string | null = null;
+      let nextConcluido = false;
       if (
         logData?.workout_id &&
         ws.some((w) => w.id === logData.workout_id)
       ) {
         nextActive = logData.workout_id;
-        setConcluido(logData.concluido ?? false);
+        nextConcluido = logData.concluido ?? false;
       } else if (schedId && ws.some((w) => w.id === schedId)) {
         nextActive = schedId;
-        setConcluido(logData?.concluido ?? false);
-      } else {
-        setConcluido(false);
+        nextConcluido = logData?.concluido ?? false;
       }
       setActiveId(nextActive);
+      setConcluido(nextConcluido);
 
       const series: SerieState = {};
       for (const ex of exToday) {
         series[ex.exercicio] = (series[ex.exercicio] ?? 0) + 1;
       }
       setSerieAtual(series);
+
+      if (persist) {
+        patchTreinoBundle({
+          today: {
+            date: today,
+            activeId: nextActive,
+            concluido: nextConcluido,
+            serieAtual: series,
+          },
+        });
+      }
     },
-    []
+    [today]
   );
 
   const syncToday = useCallback(
@@ -166,16 +173,41 @@ export default function TreinoPage() {
         setAgenda(cached.agenda);
         setLastLoads(cached.lastLoads);
         setPrs(cached.prs);
+
+        if (cached.today?.date === today) {
+          setActiveId(cached.today.activeId);
+          setConcluido(cached.today.concluido);
+          setSerieAtual(cached.today.serieAtual);
+        } else if (snapshot) {
+          const exFromSeries = Object.entries(cached.today?.serieAtual ?? {}).flatMap(
+            ([nome, count]) =>
+              Array.from({ length: count }, () => ({ exercicio: nome }))
+          );
+          applyTodayState(
+            cached.workouts,
+            cached.agenda,
+            snapshot.workoutLog,
+            cached.today?.date === today ? exFromSeries : [],
+            true
+          );
+        }
+
         setLoading(false);
 
-        try {
-          const supabase = createClient();
-          const {
-            data: { user },
-          } = await supabase.auth.getUser();
-          if (user) await syncToday(supabase, user.id, cached.workouts, cached.agenda);
-        } catch {
-          // cache já exibido; sync do dia falhou em silêncio
+        const needsSync = !cached.today || cached.today.date !== today;
+
+        if (needsSync) {
+          try {
+            const supabase = createClient();
+            const {
+              data: { user },
+            } = await supabase.auth.getUser();
+            if (user) {
+              await syncToday(supabase, user.id, cached.workouts, cached.agenda);
+            }
+          } catch {
+            // cache já exibido
+          }
         }
         return;
       }
@@ -297,8 +329,34 @@ export default function TreinoPage() {
         setLoading(false);
       }
     },
-    [today, applyTodayState, syncToday]
+    [today, applyTodayState, syncToday, snapshot]
   );
+
+  useLayoutEffect(() => {
+    const bundle = getTreinoBundle();
+    if (!bundle?.workouts.length) return;
+
+    setWorkouts(bundle.workouts);
+    setAgenda(bundle.agenda);
+    setLastLoads(bundle.lastLoads);
+    setPrs(bundle.prs);
+
+    if (bundle.today?.date === today) {
+      setActiveId(bundle.today.activeId);
+      setConcluido(bundle.today.concluido);
+      setSerieAtual(bundle.today.serieAtual);
+    } else if (snapshot?.workoutLog) {
+      applyTodayState(
+        bundle.workouts,
+        bundle.agenda,
+        snapshot.workoutLog,
+        [],
+        false
+      );
+    }
+
+    setLoading(false);
+  }, [today, snapshot, applyTodayState]);
 
   useEffect(() => {
     load();
@@ -389,6 +447,7 @@ export default function TreinoPage() {
     }
     setConcluido(true);
     setTimerKey(null);
+    invalidateDailyCache();
   }
 
   async function salvarAgenda(nova: Record<string, string | null>) {
@@ -507,7 +566,7 @@ export default function TreinoPage() {
 
   return (
     <div className="space-y-4">
-      <header className="animate-fade-up flex items-end justify-between pt-1">
+      <header className="page-header flex items-end justify-between pt-1">
         <div>
           <p className="section-label">Treino</p>
           <h1 className="text-2xl font-extrabold tracking-tight">Sessão</h1>
@@ -593,10 +652,11 @@ export default function TreinoPage() {
       )}
 
       <LoadState
-        loading={loading}
+        loading={loading && workouts.length === 0}
         error={loadError}
         onRetry={() => load(true)}
-        empty={!loading && !loadError && workouts.length === 0}
+        skeleton="treino"
+        empty={workouts.length === 0 && !loadError}
         emptyTitle="Nenhum treino cadastrado"
         emptyDesc="Importe um modelo pronto ou crie seu primeiro treino."
         emptyAction={

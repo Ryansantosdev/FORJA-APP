@@ -52,6 +52,8 @@ export async function GET(req: NextRequest) {
     .eq("lembretes_ativos", true);
 
   let enviados = 0;
+  let erros = 0;
+  let usuariosComSub = 0;
 
   for (const s of allSettings ?? []) {
     const mensagens: { title: string; body: string; url: string }[] = [];
@@ -100,7 +102,10 @@ export async function GET(req: NextRequest) {
       .select("id, endpoint, keys")
       .eq("user_id", s.user_id);
 
-    for (const sub of subs ?? []) {
+    if (!subs?.length) continue;
+    usuariosComSub++;
+
+    for (const sub of subs) {
       for (const msg of mensagens) {
         try {
           await webpush.sendNotification(
@@ -112,6 +117,7 @@ export async function GET(req: NextRequest) {
           );
           enviados++;
         } catch (err: unknown) {
+          erros++;
           const status = (err as { statusCode?: number }).statusCode;
           if (status === 404 || status === 410) {
             await admin.from("push_subscriptions").delete().eq("id", sub.id);
@@ -121,5 +127,13 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, hora, enviados });
+  return NextResponse.json({
+    ok: true,
+    hora,
+    hoje,
+    enviados,
+    erros,
+    usuariosComSub,
+    usuariosAtivos: allSettings?.length ?? 0,
+  });
 }

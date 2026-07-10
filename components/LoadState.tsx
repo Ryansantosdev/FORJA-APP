@@ -1,7 +1,43 @@
 "use client";
 
 import { RefreshCw, AlertTriangle, Inbox } from "lucide-react";
-import { SkeletonCard } from "./Skeleton";
+import {
+  SkeletonCard,
+  SkeletonDashboard,
+  SkeletonDieta,
+  SkeletonTreino,
+  SkeletonProgresso,
+  SkeletonMente,
+  SkeletonConfig,
+} from "./Skeleton";
+
+export type SkeletonVariant =
+  | "default"
+  | "dashboard"
+  | "dieta"
+  | "treino"
+  | "progresso"
+  | "mente"
+  | "config";
+
+function PageSkeleton({ variant }: { variant: SkeletonVariant }) {
+  switch (variant) {
+    case "dashboard":
+      return <SkeletonDashboard />;
+    case "dieta":
+      return <SkeletonDieta />;
+    case "treino":
+      return <SkeletonTreino />;
+    case "progresso":
+      return <SkeletonProgresso />;
+    case "mente":
+      return <SkeletonMente />;
+    case "config":
+      return <SkeletonConfig />;
+    default:
+      return <SkeletonCard />;
+  }
+}
 
 type Props = {
   loading: boolean;
@@ -12,6 +48,7 @@ type Props = {
   emptyTitle?: string;
   emptyDesc?: string;
   emptyAction?: React.ReactNode;
+  skeleton?: SkeletonVariant;
 };
 
 export default function LoadState({
@@ -23,14 +60,15 @@ export default function LoadState({
   emptyTitle,
   emptyDesc,
   emptyAction,
+  skeleton = "default",
 }: Props) {
   if (loading && !error) {
-    return <SkeletonCard />;
+    return <PageSkeleton variant={skeleton} />;
   }
 
   if (error) {
     return (
-      <div className="card animate-fade-up p-6 text-center">
+      <div className="card p-6 text-center">
         <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-danger/10">
           <AlertTriangle size={24} className="text-danger" />
         </div>
@@ -48,7 +86,7 @@ export default function LoadState({
 
   if (empty) {
     return (
-      <div className="card animate-fade-up border-dashed p-8 text-center">
+      <div className="card border-dashed p-8 text-center">
         <Inbox size={28} className="mx-auto mb-2 text-muted/50" />
         <p className="font-semibold">{emptyTitle ?? "Nada aqui ainda"}</p>
         {emptyDesc && (
@@ -59,5 +97,5 @@ export default function LoadState({
     );
   }
 
-  return <div className="animate-fade-up space-y-3">{children}</div>;
+  return <div className="space-y-3">{children}</div>;
 }

@@ -28,6 +28,7 @@ import BentoCard, { BentoLabel, BentoValue } from "@/components/BentoCard";
 import RangeBar from "@/components/RangeBar";
 import WaterTracker from "@/components/WaterTracker";
 import BottomSheet from "@/components/BottomSheet";
+import { useDailyData, invalidateDailyCache } from "@/components/DailyDataProvider";
 import { showToast } from "@/lib/toast";
 import type { Meal, MealItem } from "@/lib/types";
 
@@ -56,20 +57,16 @@ const DEFAULT_META_PROT = 150;
 const MEAL_VARIANTS = ["amber", "blue", "violet", "slate"] as const;
 
 export default function DietaPage() {
-  const cached = readDietaCache();
-  const [meals, setMeals] = useState<Meal[]>(() => cached?.meals ?? []);
-  const [done, setDone] = useState<Set<string>>(
-    () => new Set(cached?.doneIds ?? [])
-  );
-  const [aguaMl, setAguaMl] = useState(() => cached?.aguaMl ?? 0);
-  const [metaAgua, setMetaAgua] = useState(() => cached?.metaAgua ?? 3000);
-  const [copoMl, setCopoMl] = useState(() => cached?.copoMl ?? 250);
-  const [metaProteina, setMetaProteina] = useState(
-    () => cached?.metaProteina ?? DEFAULT_META_PROT
-  );
+  const { snapshot } = useDailyData();
+  const [meals, setMeals] = useState<Meal[]>([]);
+  const [done, setDone] = useState<Set<string>>(() => new Set());
+  const [aguaMl, setAguaMl] = useState(0);
+  const [metaAgua, setMetaAgua] = useState(3000);
+  const [copoMl, setCopoMl] = useState(250);
+  const [metaProteina, setMetaProteina] = useState(DEFAULT_META_PROT);
   const [editing, setEditing] = useState<Meal | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [loading, setLoading] = useState(!cached);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const today = todayStr();
@@ -110,10 +107,34 @@ export default function DietaPage() {
         } = await supabase.auth.getUser();
         if (!user) return;
 
-        const settingsSelect = "meta_agua_ml, copo_ml";
+        const settingsSelect = "meta_agua_ml, copo_ml, meta_proteina_g";
+
+        if (
+          mealsFresh &&
+          entry &&
+          activeDate === today &&
+          snapshot?.meals.length
+        ) {
+          const doneIds = snapshot.mealDoneIds;
+          setMeals(entry.data.meals);
+          setDone(new Set(doneIds));
+          setAguaMl(snapshot.aguaMl);
+          setMetaAgua(snapshot.settings.meta_agua_ml);
+          setCopoMl(snapshot.settings.copo_ml);
+          setMetaProteina(snapshot.settings.meta_proteina_g);
+          setCached("dieta_data", {
+            meals: entry.data.meals,
+            doneIds,
+            aguaMl: snapshot.aguaMl,
+            metaAgua: snapshot.settings.meta_agua_ml,
+            copoMl: snapshot.settings.copo_ml,
+            metaProteina: snapshot.settings.meta_proteina_g,
+          });
+          return;
+        }
 
         if (mealsFresh && entry) {
-          const [logsRes, dailyRes, settingsRes, protRes] = await Promise.all([
+          const [logsRes, dailyRes, settingsRes] = await Promise.all([
             supabase
               .from("meal_logs")
               .select("meal_id")
@@ -132,11 +153,6 @@ export default function DietaPage() {
               .select(settingsSelect)
               .eq("user_id", user.id)
               .maybeSingle(),
-            supabase
-              .from("user_settings")
-              .select("meta_proteina_g")
-              .eq("user_id", user.id)
-              .maybeSingle(),
           ]);
 
           const doneIds = logsRes.data?.map((l) => l.meal_id) ?? [];
@@ -144,28 +160,29 @@ export default function DietaPage() {
             activeDate === today
               ? (dailyRes.data?.agua_ml ?? entry.data.aguaMl)
               : aguaMl;
-          const metaProt = protRes.error
-            ? entry.data.metaProteina ?? DEFAULT_META_PROT
-            : (protRes.data?.meta_proteina_g ?? DEFAULT_META_PROT);
+          const metaProt =
+            settingsRes.data?.meta_proteina_g ??
+            entry.data.metaProteina ??
+            DEFAULT_META_PROT;
 
           setMeals(entry.data.meals);
           setDone(new Set(doneIds));
           if (activeDate === today) setAguaMl(agua);
-          setMetaAgua(entry.data.metaAgua);
-          setCopoMl(entry.data.copoMl);
+          setMetaAgua(settingsRes.data?.meta_agua_ml ?? entry.data.metaAgua);
+          setCopoMl(settingsRes.data?.copo_ml ?? entry.data.copoMl);
           setMetaProteina(metaProt);
           setCached("dieta_data", {
             meals: entry.data.meals,
             doneIds,
             aguaMl: agua,
-            metaAgua: entry.data.metaAgua,
-            copoMl: entry.data.copoMl,
+            metaAgua: settingsRes.data?.meta_agua_ml ?? entry.data.metaAgua,
+            copoMl: settingsRes.data?.copo_ml ?? entry.data.copoMl,
             metaProteina: metaProt,
           });
           return;
         }
 
-        const [mealsRes, logsRes, dailyRes, settingsRes, protRes] = await Promise.all([
+        const [mealsRes, logsRes, dailyRes, settingsRes] = await Promise.all([
           supabase
             .from("meals")
             .select("id, ordem, nome, icone, itens")
@@ -187,11 +204,6 @@ export default function DietaPage() {
             .select(settingsSelect)
             .eq("user_id", user.id)
             .maybeSingle(),
-          supabase
-            .from("user_settings")
-            .select("meta_proteina_g")
-            .eq("user_id", user.id)
-            .maybeSingle(),
         ]);
 
         if (mealsRes.error) throw mealsRes.error;
@@ -202,9 +214,8 @@ export default function DietaPage() {
           activeDate === today ? (dailyRes.data?.agua_ml ?? 0) : aguaMl;
         const meta = settingsRes.data?.meta_agua_ml ?? 3000;
         const copo = settingsRes.data?.copo_ml ?? 250;
-        const metaProt = protRes.error
-          ? DEFAULT_META_PROT
-          : (protRes.data?.meta_proteina_g ?? DEFAULT_META_PROT);
+        const metaProt =
+          settingsRes.data?.meta_proteina_g ?? DEFAULT_META_PROT;
 
         setMeals(m);
         setDone(new Set(doneIds));
@@ -234,8 +245,21 @@ export default function DietaPage() {
         setLoading(false);
       }
     },
-    [activeDate, today, aguaMl]
+    [activeDate, today, aguaMl, snapshot]
   );
+
+  useEffect(() => {
+    const c = readDietaCache();
+    if (c?.meals.length) {
+      setMeals(c.meals);
+      setDone(new Set(c.doneIds));
+      setAguaMl(c.aguaMl);
+      setMetaAgua(c.metaAgua);
+      setCopoMl(c.copoMl);
+      setMetaProteina(c.metaProteina);
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     load();
@@ -270,6 +294,7 @@ export default function DietaPage() {
       showToast(meal ? `${meal.nome} marcada ✓` : "Refeição marcada ✓");
     }
     persistCache({ doneIds: [...newDone] });
+    if (activeDate === today) invalidateDailyCache();
   }
 
   async function mudarAgua(novoMl: number) {
@@ -285,6 +310,7 @@ export default function DietaPage() {
       { onConflict: "user_id,date" }
     );
     showToast("Água atualizada ✓");
+    invalidateDailyCache();
   }
 
   async function salvarMeal(meal: Meal) {
@@ -367,7 +393,7 @@ export default function DietaPage() {
 
   return (
     <div className="space-y-4 pb-2">
-      <header className="animate-fade-up flex items-end justify-between pt-1">
+      <header className="page-header flex items-end justify-between pt-1">
         <div>
           <p className="section-label">Nutrição</p>
           <h1 className="text-2xl font-extrabold tracking-tight">Dieta</h1>
@@ -452,6 +478,7 @@ export default function DietaPage() {
         loading={loading}
         error={loadError}
         onRetry={() => load(true)}
+        skeleton="dieta"
         empty={!loading && !loadError && meals.length === 0}
         emptyTitle="Cardápio vazio"
         emptyDesc="Adicione refeições ou rode o schema no Supabase."

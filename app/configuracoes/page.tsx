@@ -15,6 +15,19 @@ import type { UserSettings } from "@/lib/types";
 import { mlDeLitros } from "@/lib/agua";
 import { formatLitersFromMl } from "@/lib/format";
 import BentoCard, { BentoLabel } from "@/components/BentoCard";
+import { SkeletonConfig } from "@/components/Skeleton";
+import {
+  getCached,
+  setCached,
+  getCachedEntry,
+  isCacheFresh,
+  setCacheUserId,
+  SETTINGS_TTL,
+  invalidateCache,
+} from "@/lib/cache";
+import { invalidateDailyCache } from "@/components/DailyDataProvider";
+
+const SETTINGS_KEY = "settings_data";
 
 const HORAS_UTIL = Array.from({ length: 14 }, (_, i) => i + 8);
 
@@ -49,30 +62,51 @@ export default function ConfiguracoesPage() {
     "idle" | "on" | "unsupported" | "denied" | "needs_install" | "no_vapid" | "loading"
   >("idle");
   const [pushError, setPushError] = useState<string | null>(null);
+  const [pushTestMsg, setPushTestMsg] = useState<string | null>(null);
+  const [testingPush, setTestingPush] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const cached = getCached<UserSettings>(SETTINGS_KEY);
+    if (cached) {
+      setS({ ...DEFAULTS, ...cached });
+      setLoading(false);
+    }
+
     (async () => {
+      const entry = getCachedEntry<UserSettings>(SETTINGS_KEY);
+      if (isCacheFresh(entry, SETTINGS_TTL) && entry?.data) {
+        setS({ ...DEFAULTS, ...entry.data });
+        setLoading(false);
+        return;
+      }
+
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+      setCacheUserId(user.id);
+
       const { data } = await supabase
         .from("user_settings")
         .select("*")
         .eq("user_id", user.id)
         .maybeSingle();
       if (data) {
-        setS({
+        const merged = {
           ...DEFAULTS,
           ...data,
           agua_lembrete_horas:
             (data.agua_lembrete_horas as number[]) ?? DEFAULTS.agua_lembrete_horas,
-        });
+        };
+        setS(merged);
+        setCached(SETTINGS_KEY, merged);
       }
       const { count } = await supabase
         .from("push_subscriptions")
         .select("id", { count: "exact", head: true })
         .eq("user_id", user.id);
       if (count && count > 0) setPushStatus("on");
+      setLoading(false);
     })();
     const block = getPushBlockReason();
     if (block === "no_vapid") setPushStatus("no_vapid");
@@ -109,6 +143,8 @@ export default function ConfiguracoesPage() {
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+    setCached(SETTINGS_KEY, s);
+    invalidateDailyCache();
   }
 
   async function ativarPush() {
@@ -141,22 +177,57 @@ export default function ConfiguracoesPage() {
       }
       await ensureServiceWorker();
       const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapid),
-      });
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapid),
+        });
+      }
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+      const json = sub.toJSON();
       const { error } = await supabase.from("push_subscriptions").upsert(
-        { user_id: user.id, endpoint: sub.endpoint, keys: sub.toJSON().keys },
+        {
+          user_id: user.id,
+          endpoint: sub.endpoint,
+          keys: {
+            p256dh: json.keys?.p256dh,
+            auth: json.keys?.auth,
+          },
+        },
         { onConflict: "endpoint" }
       );
       if (error) throw error;
       setPushStatus("on");
+      setPushTestMsg(null);
     } catch (e) {
       setPushStatus("idle");
       setPushError(e instanceof Error ? e.message : "Erro ao ativar notificações");
+    }
+  }
+
+  async function testarPush() {
+    setPushTestMsg(null);
+    setTestingPush(true);
+    try {
+      const res = await fetch("/api/push/test", { method: "POST" });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        sent?: number;
+        errors?: string[];
+      };
+      if (!res.ok) {
+        setPushTestMsg(data.error ?? "Falha ao enviar teste.");
+      } else {
+        setPushTestMsg("Notificação de teste enviada! Verifique a tela de bloqueio.");
+      }
+    } catch {
+      setPushTestMsg("Erro de rede ao testar push.");
+    } finally {
+      setTestingPush(false);
     }
   }
 
@@ -169,13 +240,17 @@ export default function ConfiguracoesPage() {
 
   return (
     <div className="space-y-4 pb-2">
-      <header className="animate-fade-up flex items-center gap-3 pt-2">
+      <header className="page-header flex items-center gap-3 pt-2">
         <Link href="/" className="btn-ghost p-2">
           <ArrowLeft size={20} />
         </Link>
         <h1 className="text-2xl font-bold tracking-tight">Configurações</h1>
       </header>
 
+      {loading ? (
+        <SkeletonConfig />
+      ) : (
+        <>
       <BentoCard variant="blue" className="!min-h-0" span={2}>
         <BentoLabel>Água</BentoLabel>
         <div className="mt-3 space-y-3">
@@ -317,9 +392,26 @@ export default function ConfiguracoesPage() {
           iPhone: instale na tela de início (iOS 16.4+).
         </p>
         {pushStatus === "on" ? (
-          <p className="flex items-center gap-2 text-sm text-mint">
-            <Bell size={16} /> Ativadas neste aparelho
-          </p>
+          <div className="space-y-3">
+            <p className="flex items-center gap-2 text-sm text-mint">
+              <Bell size={16} /> Ativadas neste aparelho
+            </p>
+            <button
+              type="button"
+              onClick={testarPush}
+              disabled={testingPush}
+              className="btn-ghost w-full border border-white/15 py-3 text-sm disabled:opacity-50"
+            >
+              {testingPush ? "Enviando teste..." : "Enviar notificação de teste"}
+            </button>
+            {pushTestMsg && (
+              <p
+                className={`text-xs ${pushTestMsg.includes("enviada") ? "text-mint" : "text-danger"}`}
+              >
+                {pushTestMsg}
+              </p>
+            )}
+          </div>
         ) : pushStatus === "needs_install" ? (
           <div className="space-y-2 text-sm text-white/55">
             <p className="flex items-center gap-2">
@@ -373,6 +465,8 @@ export default function ConfiguracoesPage() {
       >
         <LogOut size={16} /> Sair
       </button>
+        </>
+      )}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import "./globals.css";
 import BottomNav from "@/components/BottomNav";
 import SwRegister from "@/components/SwRegister";
 import ToastHost from "@/components/ToastHost";
+import AppProviders from "@/components/AppProviders";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -43,7 +44,7 @@ export default function RootLayout({
         <div className="app-bg" aria-hidden />
         <SwRegister />
         <main className="mx-auto max-w-md px-4 pt-[calc(env(safe-area-inset-top)+16px)] pb-[calc(env(safe-area-inset-bottom)+96px)]">
-          {children}
+          <AppProviders>{children}</AppProviders>
         </main>
         <BottomNav />
         <ToastHost />
