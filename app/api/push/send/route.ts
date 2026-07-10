@@ -19,7 +19,9 @@ export async function GET(req: NextRequest) {
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ??
+    process.env.SUPABASE_SECRET_KEY?.trim();
   const vapidPublic = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   const vapidPrivate = process.env.VAPID_PRIVATE_KEY;
 

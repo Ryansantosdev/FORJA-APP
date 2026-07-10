@@ -27,7 +27,9 @@ export async function POST() {
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ??
+    process.env.SUPABASE_SECRET_KEY?.trim();
   const vapidPublic = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY?.trim();
   const vapidPrivate = process.env.VAPID_PRIVATE_KEY?.trim();
 
@@ -35,7 +37,7 @@ export async function POST() {
     return NextResponse.json(
       {
         error:
-          "SUPABASE_SERVICE_ROLE_KEY não configurada na Vercel. Use a chave legacy service_role (JWT eyJ...), não a sb_secret.",
+          "Chave secreta do Supabase não configurada na Vercel (SUPABASE_SERVICE_ROLE_KEY ou SUPABASE_SECRET_KEY).",
       },
       { status: 500 }
     );
@@ -43,16 +45,6 @@ export async function POST() {
   if (!vapidPublic || !vapidPrivate) {
     return NextResponse.json(
       { error: "Chaves VAPID não configuradas na Vercel." },
-      { status: 500 }
-    );
-  }
-
-  if (serviceKey.startsWith("sb_secret_")) {
-    return NextResponse.json(
-      {
-        error:
-          "SUPABASE_SERVICE_ROLE_KEY está como sb_secret. No Supabase → Settings → API → Legacy → copie a service_role (JWT eyJ...).",
-      },
       { status: 500 }
     );
   }
@@ -78,7 +70,7 @@ export async function POST() {
       return NextResponse.json(
         {
           error:
-            "Service role inválida. No Supabase use Legacy → service_role (eyJ...).",
+            "Chave secreta do Supabase inválida. Copie de novo em Settings → API Keys (sb_secret_... ou service_role).",
         },
         { status: 500 }
       );
