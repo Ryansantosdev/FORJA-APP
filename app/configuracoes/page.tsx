@@ -396,7 +396,7 @@ export default function ConfiguracoesPage() {
       <BentoCard variant="glass" className="!min-h-0" span={2}>
         <p className="mb-2 text-sm font-semibold">Notificações push</p>
         <p className="mb-3 text-xs text-white/45">
-          Água nos horários escolhidos + frases no intervalo definido (8h–21h).
+          Lembretes de água e frases nos horários escolhidos — tom de pausa, não de meta.
           iPhone: instale na tela de início (iOS 16.4+).
         </p>
         {pushStatus === "on" ? (

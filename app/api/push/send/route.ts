@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import webpush from "web-push";
 import { deveEnviarFrase, insightForPush } from "@/lib/insights-push";
-import { pushPayload } from "@/lib/push-payload";
+import { pushPayload, lembreteAguaPush, fraseLembretePush } from "@/lib/push-payload";
 
 export const dynamic = "force-dynamic";
 
@@ -71,15 +71,15 @@ export async function GET(req: NextRequest) {
         .maybeSingle();
       const bebido = daily?.agua_ml ?? 0;
       if (bebido < s.meta_agua_ml) {
-        const faltaL = ((s.meta_agua_ml - bebido) / 1000).toFixed(1);
-        mensagens.push(
-          pushPayload(
-            "agua",
-            "FORJA · Água",
-            `Faltam ${faltaL}L para a meta. Abra a Dieta e marque.`,
-            "/dieta"
-          )
-        );
+        const copoMl = (s.copo_ml as number) ?? 250;
+        const agua = lembreteAguaPush({
+          hora,
+          bebidoMl: bebido,
+          metaMl: s.meta_agua_ml,
+          copoMl,
+          seed: `${s.user_id}-${hoje}-${hora}`,
+        });
+        mensagens.push(pushPayload("agua", agua.title, agua.body, "/dieta"));
       }
     }
 
@@ -93,10 +93,10 @@ export async function GET(req: NextRequest) {
       deveEnviarFrase(hora, fraseInicio, fraseFim, fraseIntervalo)
     ) {
       const slot = Math.floor(((hora - fraseInicio) * 60) / fraseIntervalo);
-      const frase = insightForPush(`${s.user_id}-${hoje}-${slot}`);
-      mensagens.push(
-        pushPayload("frase", "FORJA · Mente", frase.body, "/motivacao")
-      );
+      const seed = `${s.user_id}-${hoje}-${slot}`;
+      const insight = insightForPush(seed);
+      const frase = fraseLembretePush(seed, insight);
+      mensagens.push(pushPayload("frase", frase.title, frase.body, "/motivacao"));
     }
 
     if (mensagens.length === 0) continue;

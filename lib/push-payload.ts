@@ -1,5 +1,13 @@
 /** Payload enviado ao service worker via Web Push. */
 
+import {
+  fraseLembretePush,
+  lembreteAguaPush,
+  previewAguaPush,
+  previewFrasePush,
+} from "@/lib/push-reminders";
+import { insightForPush } from "@/lib/insights-push";
+
 export type PushKind = "agua" | "frase" | "teste";
 
 export type PushPayload = {
@@ -19,22 +27,17 @@ export function pushPayload(
 }
 
 /** Mensagens de preview — mesmas usadas no disparo real e nos testes. */
-export function pushPreview(kind: PushKind, opts?: { faltaL?: string }): PushPayload {
+export function pushPreview(kind: PushKind): PushPayload {
   switch (kind) {
-    case "agua":
-      return pushPayload(
-        "agua",
-        "FORJA · Água",
-        `Faltam ${opts?.faltaL ?? "1.0"}L para a meta. Abra a Dieta e marque.`,
-        "/dieta"
-      );
-    case "frase":
-      return pushPayload(
-        "frase",
-        "FORJA · Mente",
-        "Disciplina vence motivação — Provérbios 12:24",
-        "/motivacao"
-      );
+    case "agua": {
+      const msg = previewAguaPush("test-preview");
+      return pushPayload("agua", msg.title, msg.body, "/dieta");
+    }
+    case "frase": {
+      const insight = insightForPush("test-preview-frase");
+      const msg = fraseLembretePush("test-preview", insight);
+      return pushPayload("frase", msg.title, msg.body, "/motivacao");
+    }
     default:
       return pushPayload(
         "teste",
@@ -44,3 +47,5 @@ export function pushPreview(kind: PushKind, opts?: { faltaL?: string }): PushPay
       );
   }
 }
+
+export { lembreteAguaPush, fraseLembretePush };
