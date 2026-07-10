@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import webpush from "web-push";
 import { deveEnviarFrase, insightForPush } from "@/lib/insights-push";
+import { pushPayload } from "@/lib/push-payload";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +59,7 @@ export async function GET(req: NextRequest) {
   let usuariosComSub = 0;
 
   for (const s of allSettings ?? []) {
-    const mensagens: { title: string; body: string; url: string }[] = [];
+    const mensagens: ReturnType<typeof pushPayload>[] = [];
 
     const horasAgua = (s.agua_lembrete_horas as number[]) ?? [8, 11, 14, 17, 20];
     if (horasAgua.includes(hora)) {
@@ -71,11 +72,14 @@ export async function GET(req: NextRequest) {
       const bebido = daily?.agua_ml ?? 0;
       if (bebido < s.meta_agua_ml) {
         const faltaL = ((s.meta_agua_ml - bebido) / 1000).toFixed(1);
-        mensagens.push({
-          title: "Hora de beber água",
-          body: `Faltam ${faltaL}L para a meta. Abra a Dieta e marque.`,
-          url: "/dieta",
-        });
+        mensagens.push(
+          pushPayload(
+            "agua",
+            "💧 Hora de beber água",
+            `Faltam ${faltaL}L para a meta. Abra a Dieta e marque.`,
+            "/dieta"
+          )
+        );
       }
     }
 
@@ -90,11 +94,9 @@ export async function GET(req: NextRequest) {
     ) {
       const slot = Math.floor(((hora - fraseInicio) * 60) / fraseIntervalo);
       const frase = insightForPush(`${s.user_id}-${hoje}-${slot}`);
-      mensagens.push({
-        title: frase.title,
-        body: frase.body,
-        url: "/motivacao",
-      });
+      mensagens.push(
+        pushPayload("frase", `✨ ${frase.title}`, frase.body, "/motivacao")
+      );
     }
 
     if (mensagens.length === 0) continue;

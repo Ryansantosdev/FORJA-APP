@@ -3,6 +3,7 @@ import { createClient as createAdmin } from "@supabase/supabase-js";
 import webpush from "web-push";
 import { createClient } from "@/lib/supabase/server";
 import { formatPushError } from "@/lib/push";
+import { pushPayload } from "@/lib/push-payload";
 
 export const dynamic = "force-dynamic";
 
@@ -101,11 +102,14 @@ export async function POST() {
     try {
       await webpush.sendNotification(
         { endpoint: sub.endpoint, keys },
-        JSON.stringify({
-          title: "Forja — Teste",
-          body: "Notificações funcionando! Se viu isso, está tudo certo.",
-          url: "/",
-        })
+        JSON.stringify(
+          pushPayload(
+            "teste",
+            "Forja — Teste",
+            "Notificações funcionando! Se viu isso, está tudo certo.",
+            "/"
+          )
+        )
       );
       sent++;
     } catch (err: unknown) {
