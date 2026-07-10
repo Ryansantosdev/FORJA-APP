@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Check,
   Coffee,
@@ -29,6 +29,7 @@ import RangeBar from "@/components/RangeBar";
 import WaterTracker from "@/components/WaterTracker";
 import BottomSheet from "@/components/BottomSheet";
 import { useDailyData, invalidateDailyCache } from "@/components/DailyDataProvider";
+import { patchDailyAguaMl, scheduleDailyInvalidate } from "@/lib/patch-daily";
 import { showToast } from "@/lib/toast";
 import type { Meal, MealItem } from "@/lib/types";
 
@@ -71,6 +72,9 @@ export default function DietaPage() {
   const [editMode, setEditMode] = useState(false);
   const today = todayStr();
   const [activeDate, setActiveDate] = useState(() => todayStr());
+  const aguaLockRef = useRef(false);
+  const aguaSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const aguaPendingRef = useRef<number | null>(null);
 
   const persistCache = useCallback(
     (patch: Partial<DietaCache> & { doneIds?: string[] }) => {
@@ -118,7 +122,9 @@ export default function DietaPage() {
           const doneIds = snapshot.mealDoneIds;
           setMeals(entry.data.meals);
           setDone(new Set(doneIds));
-          setAguaMl(snapshot.aguaMl);
+          if (activeDate === today && !aguaLockRef.current) {
+            setAguaMl(snapshot.aguaMl);
+          }
           setMetaAgua(snapshot.settings.meta_agua_ml);
           setCopoMl(snapshot.settings.copo_ml);
           setMetaProteina(snapshot.settings.meta_proteina_g);
@@ -167,7 +173,9 @@ export default function DietaPage() {
 
           setMeals(entry.data.meals);
           setDone(new Set(doneIds));
-          if (activeDate === today) setAguaMl(agua);
+          if (activeDate === today && !aguaLockRef.current) {
+            setAguaMl(agua);
+          }
           setMetaAgua(settingsRes.data?.meta_agua_ml ?? entry.data.metaAgua);
           setCopoMl(settingsRes.data?.copo_ml ?? entry.data.copoMl);
           setMetaProteina(metaProt);
@@ -219,7 +227,9 @@ export default function DietaPage() {
 
         setMeals(m);
         setDone(new Set(doneIds));
-        if (activeDate === today) setAguaMl(agua);
+        if (activeDate === today && !aguaLockRef.current) {
+          setAguaMl(agua);
+        }
         setMetaAgua(meta);
         setCopoMl(copo);
         setMetaProteina(metaProt);
@@ -245,7 +255,7 @@ export default function DietaPage() {
         setLoading(false);
       }
     },
-    [activeDate, today, aguaMl, snapshot]
+    [activeDate, today, snapshot]
   );
 
   useEffect(() => {
@@ -297,9 +307,7 @@ export default function DietaPage() {
     if (activeDate === today) invalidateDailyCache();
   }
 
-  async function mudarAgua(novoMl: number) {
-    setAguaMl(novoMl);
-    persistCache({ aguaMl: novoMl });
+  async function salvarAgua(novoMl: number) {
     const supabase = createClient();
     const {
       data: { user },
@@ -309,9 +317,39 @@ export default function DietaPage() {
       { user_id: user.id, date: today, agua_ml: novoMl },
       { onConflict: "user_id,date" }
     );
-    showToast("Água atualizada ✓");
-    invalidateDailyCache();
   }
+
+  function adicionarAgua(deltaMl: number) {
+    if (activeDate !== today || deltaMl === 0) return;
+
+    const novoMl = Math.max(0, aguaMl + deltaMl);
+    aguaLockRef.current = true;
+    aguaPendingRef.current = novoMl;
+    setAguaMl(novoMl);
+    persistCache({ aguaMl: novoMl });
+    patchDailyAguaMl(novoMl);
+
+    if (aguaSaveRef.current) clearTimeout(aguaSaveRef.current);
+    aguaSaveRef.current = setTimeout(() => {
+      const ml = aguaPendingRef.current;
+      if (ml === null) return;
+      void salvarAgua(ml)
+        .then(() => scheduleDailyInvalidate())
+        .catch(() => showToast("Não foi possível salvar a água. Tente de novo."))
+        .finally(() => {
+          aguaPendingRef.current = null;
+          setTimeout(() => {
+            aguaLockRef.current = false;
+          }, 300);
+        });
+    }, 350);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (aguaSaveRef.current) clearTimeout(aguaSaveRef.current);
+    };
+  }, []);
 
   async function salvarMeal(meal: Meal) {
     const supabase = createClient();
@@ -432,7 +470,7 @@ export default function DietaPage() {
           aguaMl={aguaMl}
           metaMl={metaAgua}
           copoMl={copoMl}
-          onChange={mudarAgua}
+          onAdd={adicionarAgua}
         />
       )}
 

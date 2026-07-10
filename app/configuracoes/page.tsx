@@ -11,6 +11,7 @@ import {
   subscribeForPush,
   formatPushError,
 } from "@/lib/push";
+import type { PushKind } from "@/lib/push-payload";
 import type { UserSettings } from "@/lib/types";
 import { mlDeLitros } from "@/lib/agua";
 import { formatLitersFromMl } from "@/lib/format";
@@ -63,7 +64,7 @@ export default function ConfiguracoesPage() {
   >("idle");
   const [pushError, setPushError] = useState<string | null>(null);
   const [pushTestMsg, setPushTestMsg] = useState<string | null>(null);
-  const [testingPush, setTestingPush] = useState(false);
+  const [testingPush, setTestingPush] = useState<PushKind | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -204,13 +205,20 @@ export default function ConfiguracoesPage() {
     }
   }
 
-  async function testarPush() {
+  async function testarPush(kind: PushKind) {
     setPushTestMsg(null);
-    setTestingPush(true);
+    setTestingPush(kind);
+    const labels: Record<PushKind, string> = {
+      agua: "Notificação de água enviada!",
+      frase: "Notificação de frase enviada!",
+      teste: "Notificação de teste enviada!",
+    };
     try {
       const res = await fetch("/api/push/test", {
         method: "POST",
         credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: kind }),
       });
       const data = (await res.json()) as {
         ok?: boolean;
@@ -222,12 +230,12 @@ export default function ConfiguracoesPage() {
         const detail = data.errors?.[0] ?? data.error ?? "Falha ao enviar teste.";
         setPushTestMsg(formatPushError(detail));
       } else {
-        setPushTestMsg("Notificação de teste enviada! Verifique a tela de bloqueio.");
+        setPushTestMsg(`${labels[kind]} Verifique a tela de bloqueio.`);
       }
     } catch {
       setPushTestMsg("Erro de rede ao testar push.");
     } finally {
-      setTestingPush(false);
+      setTestingPush(null);
     }
   }
 
@@ -396,14 +404,26 @@ export default function ConfiguracoesPage() {
             <p className="flex items-center gap-2 text-sm text-mint">
               <Bell size={16} /> Ativadas neste aparelho
             </p>
-            <button
-              type="button"
-              onClick={testarPush}
-              disabled={testingPush}
-              className="btn-ghost w-full border border-white/15 py-3 text-sm disabled:opacity-50"
-            >
-              {testingPush ? "Enviando teste..." : "Enviar notificação de teste"}
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => testarPush("agua")}
+                disabled={testingPush !== null}
+                className="btn-ghost inline-flex items-center justify-center gap-1.5 border border-water/25 py-3 text-sm text-water disabled:opacity-50"
+              >
+                <Droplets size={15} />
+                {testingPush === "agua" ? "Enviando..." : "Testar água"}
+              </button>
+              <button
+                type="button"
+                onClick={() => testarPush("frase")}
+                disabled={testingPush !== null}
+                className="btn-ghost inline-flex items-center justify-center gap-1.5 border border-violet/25 py-3 text-sm text-violet disabled:opacity-50"
+              >
+                <Quote size={15} />
+                {testingPush === "frase" ? "Enviando..." : "Testar frase"}
+              </button>
+            </div>
             {pushTestMsg && (
               <p
                 className={`text-xs ${pushTestMsg.includes("enviada") ? "text-mint" : "text-danger"}`}

@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient as createAdmin } from "@supabase/supabase-js";
 import webpush from "web-push";
 import { createClient } from "@/lib/supabase/server";
 import { formatPushError } from "@/lib/push";
-import { pushPayload } from "@/lib/push-payload";
+import { pushPreview, type PushKind } from "@/lib/push-payload";
 
 export const dynamic = "force-dynamic";
 
@@ -17,14 +17,29 @@ function parseKeys(raw: unknown): { p256dh: string; auth: string } | null {
   return { p256dh, auth };
 }
 
+function parseKind(body: unknown): PushKind {
+  if (!body || typeof body !== "object") return "teste";
+  const t = (body as { type?: string }).type;
+  if (t === "agua" || t === "frase" || t === "teste") return t;
+  return "teste";
+}
+
 /** Envia notificação de teste para o usuário logado (diagnóstico). */
-export async function POST() {
+export async function POST(req: NextRequest) {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Faça login primeiro." }, { status: 401 });
+  }
+
+  let kind: PushKind = "teste";
+  try {
+    const body = await req.json();
+    kind = parseKind(body);
+  } catch {
+    /* body vazio = teste genérico */
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -88,6 +103,7 @@ export async function POST() {
     );
   }
 
+  const payload = pushPreview(kind);
   let sent = 0;
   const errors: string[] = [];
 
@@ -102,14 +118,7 @@ export async function POST() {
     try {
       await webpush.sendNotification(
         { endpoint: sub.endpoint, keys },
-        JSON.stringify(
-          pushPayload(
-            "teste",
-            "Forja — Teste",
-            "Notificações funcionando! Se viu isso, está tudo certo.",
-            "/"
-          )
-        )
+        JSON.stringify(payload)
       );
       sent++;
     } catch (err: unknown) {
@@ -127,6 +136,7 @@ export async function POST() {
       {
         ok: false,
         sent: 0,
+        type: kind,
         error: errors[0] ?? "Falha ao enviar. Reative as notificações.",
         errors,
       },
@@ -134,5 +144,5 @@ export async function POST() {
     );
   }
 
-  return NextResponse.json({ ok: true, sent, errors });
+  return NextResponse.json({ ok: true, sent, type: kind, errors });
 }

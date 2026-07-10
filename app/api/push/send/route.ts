@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
         mensagens.push(
           pushPayload(
             "agua",
-            "💧 Hora de beber água",
+            "FORJA · Água",
             `Faltam ${faltaL}L para a meta. Abra a Dieta e marque.`,
             "/dieta"
           )
@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
       const slot = Math.floor(((hora - fraseInicio) * 60) / fraseIntervalo);
       const frase = insightForPush(`${s.user_id}-${hoje}-${slot}`);
       mensagens.push(
-        pushPayload("frase", `✨ ${frase.title}`, frase.body, "/motivacao")
+        pushPayload("frase", "FORJA · Mente", frase.body, "/motivacao")
       );
     }
 
