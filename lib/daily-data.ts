@@ -1,7 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Meal } from "./types";
 import { todayStr, daysAgoStr } from "./dates";
-import { syncStreakFromSnapshot } from "./streak";
 
 export type DailySnapshot = {
   today: string;
@@ -21,9 +20,10 @@ export type DailySnapshot = {
     agenda_treino: Record<string, string | null>;
     onboarding_done: boolean;
   };
+  hasSettingsRow: boolean;
   focusWeekMin: number;
   focusByDay: Record<string, number>;
-  streak: { current: number; max: number };
+  streak: { current: number; max: number; last_completed_date: string | null };
 };
 
 export async function fetchDailySnapshot(
@@ -64,13 +64,7 @@ export async function fetchDailySnapshot(
       .eq("user_id", userId)
       .eq("date", today)
       .maybeSingle(),
-    supabase
-      .from("user_settings")
-      .select(
-        "meta_agua_ml, copo_ml, meta_peso, meta_proteina_g, agenda_treino, onboarding_done"
-      )
-      .eq("user_id", userId)
-      .maybeSingle(),
+    supabase.from("user_settings").select("*").eq("user_id", userId).maybeSingle(),
     supabase
       .from("focus_logs")
       .select("date, minutos")
@@ -83,6 +77,8 @@ export async function fetchDailySnapshot(
       .maybeSingle(),
   ]);
 
+  if (mealsRes.error) throw mealsRes.error;
+
   const meals = (mealsRes.data as Meal[]) ?? [];
   const mealDoneIds = mealLogsRes.data?.map((l) => l.meal_id) ?? [];
   const settings = settingsRes.data;
@@ -94,30 +90,27 @@ export async function fetchDailySnapshot(
     focusByDay[f.date] = (focusByDay[f.date] ?? 0) + f.minutos;
   }
 
-  const streak = await syncStreakFromSnapshot(supabase, userId, {
-    mealsCount: meals.length,
-    mealDoneCount: mealDoneIds.length,
-    workoutDone: workoutRes.data?.concluido === true,
-    agenda,
-    stats: statsRes.data ?? null,
-  });
-
   return {
     today,
     meals,
     mealDoneIds,
     workoutLog: workoutRes.data ?? null,
     aguaMl: dailyRes.data?.agua_ml ?? 0,
+    hasSettingsRow: Boolean(settings),
     settings: {
       meta_agua_ml: settings?.meta_agua_ml ?? 3000,
       copo_ml: settings?.copo_ml ?? 250,
       meta_peso: settings?.meta_peso ?? null,
       meta_proteina_g: settings?.meta_proteina_g ?? 150,
       agenda_treino: agenda,
-      onboarding_done: settings?.onboarding_done ?? false,
+      onboarding_done: settings?.onboarding_done ?? true,
     },
     focusWeekMin: focusRes.data?.reduce((a, f) => a + f.minutos, 0) ?? 0,
     focusByDay,
-    streak,
+    streak: {
+      current: statsRes.data?.current_streak ?? 0,
+      max: statsRes.data?.max_streak ?? 0,
+      last_completed_date: statsRes.data?.last_completed_date ?? null,
+    },
   };
 }

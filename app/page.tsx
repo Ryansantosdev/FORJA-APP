@@ -21,13 +21,13 @@ import { formatLitersFromMl } from "@/lib/format";
 import BentoCard, { BentoLabel, BentoValue } from "@/components/BentoCard";
 import RangeBar from "@/components/RangeBar";
 import ProgressRing from "@/components/ProgressRing";
+import { RefreshCw } from "lucide-react";
 import { SkeletonDashboard } from "@/components/Skeleton";
 import { useDailyData } from "@/components/DailyDataProvider";
-import type { Meal } from "@/lib/types";
 
 export default function Dashboard() {
   const router = useRouter();
-  const { snapshot, loading, ready } = useDailyData();
+  const { snapshot, loading, ready, error, refresh } = useDailyData();
   const [frase, setFrase] = useState<Insight | null>(null);
   const [hour, setHour] = useState(0);
 
@@ -37,7 +37,11 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (ready && snapshot && !snapshot.settings.onboarding_done) {
+    if (
+      ready &&
+      snapshot?.hasSettingsRow &&
+      snapshot.settings.onboarding_done === false
+    ) {
       router.push("/onboarding");
     }
   }, [ready, snapshot, router]);
@@ -93,7 +97,7 @@ export default function Dashboard() {
 
   const streak = snapshot?.streak;
   const atRisk = hour >= 18 && (resumo?.pctDia ?? 0) < 100;
-  const showSkeleton = loading && !snapshot;
+  const showSkeleton = !ready || (loading && !snapshot);
   const conquistas = ACHIEVEMENTS.filter((a) => (streak?.max ?? 0) >= a.dias);
 
   return (
@@ -120,6 +124,18 @@ export default function Dashboard() {
 
       {showSkeleton ? (
         <SkeletonDashboard />
+      ) : error && !resumo ? (
+        <div className="card p-6 text-center">
+          <p className="mb-1 font-semibold">Não foi possível carregar</p>
+          <p className="mb-4 text-xs text-white/45">{error}</p>
+          <button
+            type="button"
+            onClick={() => void refresh(true)}
+            className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-sm"
+          >
+            <RefreshCw size={16} /> Tentar de novo
+          </button>
+        </div>
       ) : resumo ? (
         <>
           <BentoCard
