@@ -48,3 +48,56 @@ export function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuf
   for (let i = 0; i < rawData.length; i++) arr[i] = rawData.charCodeAt(i);
   return arr;
 }
+
+export type PushKeys = { p256dh: string; auth: string };
+
+export function keysFromSubscription(sub: PushSubscription): PushKeys | null {
+  const json = sub.toJSON();
+  const p256dh = json.keys?.p256dh;
+  const auth = json.keys?.auth;
+  if (!p256dh || !auth) return null;
+  return { p256dh, auth };
+}
+
+/** Inscreve (ou reinscreve) com a VAPID pública atual — evita mismatch com o servidor. */
+export async function subscribeForPush(vapidPublicKey: string): Promise<{
+  endpoint: string;
+  keys: PushKeys;
+}> {
+  await ensureServiceWorker();
+  const reg = await navigator.serviceWorker.ready;
+
+  const existing = await reg.pushManager.getSubscription();
+  if (existing) {
+    await existing.unsubscribe();
+  }
+
+  const sub = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+  });
+
+  const keys = keysFromSubscription(sub);
+  if (!keys) {
+    throw new Error("Navegador não retornou chaves de push. Tente reiniciar o app.");
+  }
+
+  return { endpoint: sub.endpoint, keys };
+}
+
+export function formatPushError(raw: string): string {
+  const m = raw.toLowerCase();
+  if (m.includes("vapid") || m.includes("pkhash") || m.includes("credentials")) {
+    return "Chaves VAPID não batem. Toque em Ativar notificações de novo.";
+  }
+  if (m.includes("410") || m.includes("expired") || m.includes("gone")) {
+    return "Inscrição expirada. Toque em Ativar notificações de novo.";
+  }
+  if (m.includes("404") || m.includes("not found")) {
+    return "Inscrição inválida. Reative as notificações.";
+  }
+  if (m.includes("unauthorized") || m.includes("401") || m.includes("403")) {
+    return "Permissão recusada pelo servidor push. Reative as notificações.";
+  }
+  return raw;
+}

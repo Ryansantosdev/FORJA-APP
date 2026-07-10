@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  webpush.setVapidDetails("mailto:forja@app.local", vapidPublic, vapidPrivate);
+  webpush.setVapidDetails("mailto:forja@forja.app", vapidPublic, vapidPrivate);
 
   const admin = createClient(supabaseUrl, serviceKey);
 

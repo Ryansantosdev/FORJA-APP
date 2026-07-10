@@ -6,10 +6,10 @@ import { ArrowLeft, Bell, BellOff, LogOut, Check, Droplets, Quote } from "lucide
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import {
-  ensureServiceWorker,
   getPushBlockReason,
   isPushApiAvailable,
-  urlBase64ToUint8Array,
+  subscribeForPush,
+  formatPushError,
 } from "@/lib/push";
 import type { UserSettings } from "@/lib/types";
 import { mlDeLitros } from "@/lib/agua";
@@ -175,36 +175,32 @@ export default function ConfiguracoesPage() {
         setPushStatus("denied");
         return;
       }
-      await ensureServiceWorker();
-      const reg = await navigator.serviceWorker.ready;
-      let sub = await reg.pushManager.getSubscription();
-      if (!sub) {
-        sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapid),
-        });
-      }
+
+      const { endpoint, keys } = await subscribeForPush(vapid);
+
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const json = sub.toJSON();
+
+      await supabase
+        .from("push_subscriptions")
+        .delete()
+        .eq("user_id", user.id)
+        .neq("endpoint", endpoint);
+
       const { error } = await supabase.from("push_subscriptions").upsert(
-        {
-          user_id: user.id,
-          endpoint: sub.endpoint,
-          keys: {
-            p256dh: json.keys?.p256dh,
-            auth: json.keys?.auth,
-          },
-        },
+        { user_id: user.id, endpoint, keys },
         { onConflict: "endpoint" }
       );
       if (error) throw error;
       setPushStatus("on");
       setPushTestMsg(null);
+      setPushError(null);
     } catch (e) {
       setPushStatus("idle");
-      setPushError(e instanceof Error ? e.message : "Erro ao ativar notificações");
+      setPushError(
+        formatPushError(e instanceof Error ? e.message : "Erro ao ativar notificações")
+      );
     }
   }
 
@@ -212,7 +208,10 @@ export default function ConfiguracoesPage() {
     setPushTestMsg(null);
     setTestingPush(true);
     try {
-      const res = await fetch("/api/push/test", { method: "POST" });
+      const res = await fetch("/api/push/test", {
+        method: "POST",
+        credentials: "include",
+      });
       const data = (await res.json()) as {
         ok?: boolean;
         error?: string;
@@ -220,7 +219,8 @@ export default function ConfiguracoesPage() {
         errors?: string[];
       };
       if (!res.ok) {
-        setPushTestMsg(data.error ?? "Falha ao enviar teste.");
+        const detail = data.errors?.[0] ?? data.error ?? "Falha ao enviar teste.";
+        setPushTestMsg(formatPushError(detail));
       } else {
         setPushTestMsg("Notificação de teste enviada! Verifique a tela de bloqueio.");
       }
